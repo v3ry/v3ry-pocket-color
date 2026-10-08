@@ -256,3 +256,13 @@ Les tests couvrent le processeur (dont les immediats signes SP), les banques de 
 Les tests 2.5D couvrent la selection des presets/revisions, les UV, le clipping et le bouclage de carte, l'extrusion, les palettes par ligne, la recomposition exacte des couches, les limites/priorites des sprites, la conservation des etats, les reglages en pause et les replis WebGL. Les tests Cristal verifient les hauteurs distinctes, les silhouettes independantes, la limite de reconnaissance a 85 %, les banques et bornes memoire, et les menus sans perspective. Le pipeline WebGL est teste avec un contexte simule ; la compilation des shaders et le rendu reel doivent aussi etre verifies dans un navigateur.
 
 Utilisez uniquement des ROM que vous etes autorise a utiliser.
+
+## Licence
+
+Copyright (C) 2026 v3ry et les contributeurs.
+
+Le code source, la documentation et les ressources originales de **v3ry Pocket Color** sont distribues sous la **GNU General Public License, version 3 uniquement** (`SPDX-License-Identifier: GPL-3.0-only`). Le texte integral figure dans [LICENSE](LICENSE).
+
+Vous pouvez utiliser, modifier et redistribuer le projet, y compris commercialement, dans les conditions de cette licence. Lors d'une redistribution d'une version modifiee, le code source correspondant doit etre fourni sous GPL v3, les modifications signalees et les mentions de licence et d'auteur conservees. Le logiciel est fourni sans garantie, dans les limites autorisees par la loi.
+
+Cette licence ne donne aucun droit sur les ROM, BIOS, graphismes ou autres contenus de jeux tiers charges par l'utilisateur. Aucune ROM ni aucun BIOS n'est distribue dans le depot. Game Boy, Game Boy Color, Pokemon et les autres marques et noms de jeux cites appartiennent a leurs ayants droit respectifs. Ce projet n'est ni affilie ni approuve par Nintendo ou les editeurs des jeux cites.
