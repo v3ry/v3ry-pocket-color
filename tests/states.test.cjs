@@ -90,3 +90,18 @@ test("state decoding rejects empty, oversized or invalid JSON", async () => {
   await assert.rejects(States.decode({ size: States.MAX_SIZE + 1 }), /volumineux/);
   await assert.rejects(States.decode(new Blob(["not JSON"])), /illisible/);
 });
+
+test("states preserve the early LY reset while the PPU is still on VBlank line 153", () => {
+  const rom = makeROM({ color: true }), key = "0".repeat(64);
+  const game = new GameBoy(rom), restored = new GameBoy(rom);
+  game.tick(456 * 153 + 4);
+  States.restore(restored, States.capture(game, key), key);
+  assert.equal(restored.ly, 153);
+  assert.equal(restored.dot, 4);
+  assert.equal(restored.read(0xff44), 0);
+  assert.equal(restored.mode(), 1);
+  game.tick(452); restored.tick(452);
+  assert.equal(restored.ly, game.ly);
+  assert.equal(restored.dot, game.dot);
+  assert.equal(restored.mode(), 2);
+});

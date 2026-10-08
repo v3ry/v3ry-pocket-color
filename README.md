@@ -55,9 +55,19 @@ Si l'API Fullscreen est absente ou refusee, un message explique le passage a un 
 - `states.js` : instantanes versionnes CPU, bus, video, DMA, audio, cartouche et RTC ; validation avant restauration.
 - `app.js` : chargement local, choix dans les archives, canvas, boucle temps reel et commandes.
 
+### Acces video et timer
+
+Les acces **CPU** a la VRAM sont bloques en mode LCD 3 ; ceux a l'OAM sont bloques en modes 2 et 3. Les lectures renvoient FF et les ecritures sont ignorees. LCD eteint, les deux memoires sont accessibles. Les transferts DMA utilisent un chemin distinct afin de ne pas appliquer les restrictions CPU a leur source.
+
+Les donnees de palettes CGB sont egalement inaccessibles en mode 3, mais l'auto-increment de l'index fonctionne meme si l'ecriture est refusee. Desactiver TAC quand le bit DIV selectionne est haut incremente TIMA sur DMG, mais pas sur CGB ; changer de frequence avec le timer actif ou reinitialiser DIV conserve le comportement sur front descendant.
+
+Ces regles suivent [Pan Docs : acces VRAM/OAM](https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html), [palettes](https://gbdev.io/pandocs/Palettes.html) et [timer](https://gbdev.io/pandocs/Timer_Obscure_Behaviour.html). Elles sont testees sur GB/CGB et ne modifient pas le format des etats existants. Les acces sont encore positionnes a la granularite de l'instruction CPU, pas de chaque acces bus.
+
+Le registre LY revient a zero au quatrieme dot de la ligne 153, alors que le PPU reste en VBlank jusqu'a la fin de cette ligne. La comparaison LYC/STAT suit cette valeur visible, sans raccourcir la trame. Ce timing permet notamment a Aladdin GBC de synchroniser ses palettes par ligne sans bandes de couleurs corrompues. Il est teste en GB, en GBC aux deux vitesses CPU et apres restauration d'un etat, sans changement de format.
+
 ### Limites de cette version experimentale
 
-Ce coeur ne promet pas la compatibilite d'un emulateur mature. Le rendu se fait par lignes avec des durees fixes : les effets raster au pixel pres, les restrictions d'acces VRAM/OAM et les subtilites du DMA/timer/APU ne sont pas reproduits au cycle exact. La synthese sonore est approximative. Le boot ROM est saute, certains registres demarrent avec des valeurs simplifiees. Pas de cable link. Les cartouches speciales (MBC6/7, camera, HuC, multicarts MBC1M...) ne sont pas prises en charge ; les types inconnus sont refuses explicitement. Le moteur de vibration MBC5 n'est pas emule.
+Ce coeur ne promet pas la compatibilite d'un emulateur mature. Le rendu se fait par lignes avec des durees fixes : les effets raster au pixel pres et les subtilites du DMA/timer/APU ne sont pas reproduits au cycle exact. La synthese sonore est approximative. Le boot ROM est saute, certains registres demarrent avec des valeurs simplifiees. Pas de cable link. Les cartouches speciales (MBC6/7, camera, HuC, multicarts MBC1M...) ne sont pas prises en charge ; les types inconnus sont refuses explicitement. Le moteur de vibration MBC5 n'est pas emule.
 
 ## Sauvegardes
 

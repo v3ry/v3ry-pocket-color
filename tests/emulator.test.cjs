@@ -109,6 +109,59 @@ test("synthetic GB and GBC ROMs execute and draw expected pixels", () => {
   }
 });
 
+test("LY resets at dot 4 of line 153 without ending VBlank, at both CGB speeds", () => {
+  for (const [color, fast] of [[false, false], [true, false], [true, true]]) {
+    const gb = new GameBoy(makeROM({ color }));
+    if (fast) { gb.write(0xff4d, 1); gb.switchSpeed(); }
+    const scale = fast ? 2 : 1;
+    gb.tick(456 * 153 * scale);
+    assert.equal(gb.read(0xff44), 153);
+    assert.equal(gb.mode(), 1);
+    gb.write(0xff45, 0);
+    gb.write(0xff41, 0x40);
+    gb.write(0xff0f, 0);
+    gb.tick(3 * scale);
+    assert.equal(gb.read(0xff44), 153);
+    assert.equal(gb.read(0xff41) & 4, 0);
+    assert.equal(gb.io[0x0f] & 2, 0);
+    gb.tick(scale);
+    assert.equal(gb.read(0xff44), 0);
+    assert.equal(gb.read(0xff41) & 7, 5);
+    assert.equal(gb.io[0x0f] & 2, 2);
+    assert.equal(gb.ly, 153);
+    assert.equal(gb.frames, 1);
+    gb.write(0xff0f, 0);
+    gb.tick(451 * scale);
+    assert.equal(gb.read(0xff44), 0);
+    assert.equal(gb.mode(), 1);
+    assert.equal(gb.io[0x0f] & 2, 0);
+    gb.tick(scale);
+    assert.equal(gb.ly, 0);
+    assert.equal(gb.dot, 0);
+    assert.equal(gb.mode(), 2);
+    assert.equal(gb.frames, 1);
+    assert.equal(gb.io[0x0f] & 2, 0);
+  }
+});
+
+test("LYC 153 coincidence clears on the early LY reset and mode 1 keeps STAT high", () => {
+  const gb = new GameBoy(makeROM({ color: true }));
+  gb.write(0xff45, 153); gb.write(0xff41, 0x40);
+  gb.tick(456 * 153);
+  assert.equal(gb.read(0xff41) & 4, 4);
+  gb.tick(4);
+  assert.equal(gb.read(0xff41) & 4, 0);
+  assert.equal(gb.statLine, false);
+  gb.write(0xff41, 0x50);
+  gb.write(0xff0f, 0);
+  gb.write(0xff45, 0);
+  assert.equal(gb.read(0xff41) & 4, 4);
+  assert.equal(gb.io[0x0f] & 2, 0);
+  gb.write(0xff40, 0);
+  assert.equal(gb.read(0xff44), 0);
+  assert.equal(gb.mode(), 0);
+});
+
 test("background attributes, window and sprite priority/transparency", () => {
   const gb = new GameBoy(makeROM({ color: true }));
   gb.bgPalette.set([0xff, 0x7f, 0x1f, 0, 0, 0, 0, 0]);
@@ -186,6 +239,74 @@ test("all timer frequencies use falling edges and disabling TAC increments once"
     assert.equal(gb.io[5], 2);
     gb.tick(period * 2);
     assert.equal(gb.io[5], 2);
+  }
+});
+
+test("CPU video access follows LCD modes and DMA bypasses CPU-only restrictions", () => {
+  for (const color of [false, true]) {
+    const gb = new GameBoy(makeROM({ color }));
+    gb.vram[0] = 0x12; gb.oam[0] = 0x34;
+    assert.equal(gb.mode(), 2);
+    assert.equal(gb.read(0x8000), 0x12);
+    assert.equal(gb.read(0xfe00), 255);
+    gb.write(0xfe00, 0x56);
+    assert.equal(gb.oam[0], 0x34);
+    gb.tick(80);
+    assert.equal(gb.mode(), 3);
+    assert.equal(gb.read(0x8000), 255);
+    gb.write(0x8000, 0x78);
+    assert.equal(gb.vram[0], 0x12);
+    gb.write(0xff46, 0x80);
+    assert.equal(gb.oam[0], 0x12);
+    gb.tick(172);
+    assert.equal(gb.mode(), 0);
+    gb.write(0x8000, 0x9a); gb.write(0xfe00, 0xbc);
+    assert.equal(gb.read(0x8000), 0x9a);
+    assert.equal(gb.read(0xfe00), 0xbc);
+    gb.tick(204 + 456 * 143);
+    assert.equal(gb.mode(), 1);
+    gb.write(0xfe00, 0xde);
+    assert.equal(gb.read(0xfe00), 0xde);
+    gb.write(0xff40, 0);
+    gb.write(0xfe00, 0xef); gb.write(0x8000, 0xab);
+    assert.equal(gb.read(0xfe00), 0xef);
+    assert.equal(gb.read(0x8000), 0xab);
+  }
+});
+
+test("CGB palette data is blocked in mode 3 but auto-increment still occurs", () => {
+  const gb = new GameBoy(makeROM({ color: true }));
+  gb.bgPalette[63] = 0x12; gb.objPalette[63] = 0x34;
+  gb.write(0xff68, 0xbf); gb.write(0xff6a, 0xbf);
+  gb.tick(80);
+  assert.equal(gb.read(0xff69), 255);
+  assert.equal(gb.read(0xff6b), 255);
+  gb.write(0xff69, 0x56); gb.write(0xff6b, 0x78);
+  assert.equal(gb.bgPalette[63], 0x12);
+  assert.equal(gb.objPalette[63], 0x34);
+  assert.equal(gb.io[0x68], 0x80);
+  assert.equal(gb.io[0x6a], 0x80);
+  gb.tick(172);
+  gb.write(0xff69, 0x9a); gb.write(0xff6b, 0xbc);
+  gb.write(0xff68, 0); gb.write(0xff6a, 0);
+  assert.equal(gb.read(0xff69), 0x9a);
+  assert.equal(gb.read(0xff6b), 0xbc);
+});
+
+test("TAC disable distinguishes CGB from DMG; frequency changes and DIV reset still tick", () => {
+  for (const color of [false, true]) {
+    const gb = new GameBoy(makeROM({ color }));
+    gb.write(0xff04, 0); gb.write(0xff07, 5);
+    gb.tick(8);
+    gb.write(0xff07, 1);
+    assert.equal(gb.io[5], color ? 0 : 1);
+    gb.write(0xff07, 5);
+    const before = gb.io[5];
+    gb.write(0xff04, 0);
+    assert.equal(gb.io[5], before + 1);
+    gb.tick(8);
+    gb.write(0xff07, 6);
+    assert.equal(gb.io[5], before + 2);
   }
 });
 

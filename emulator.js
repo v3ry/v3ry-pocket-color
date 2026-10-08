@@ -64,15 +64,21 @@
     }
     releaseButtons() { this.buttons = 0; }
     wramBank() { return this.color ? (this.io[0x70] & 7) || 1 : 1; }
-    read(address) {
+    read(address, cpuAccess = true) {
       address &= 0xffff;
       if (address < 0x8000) return this.cartridge.readROM(address);
-      if (address < 0xa000) return this.vram[(address & 0x1fff) + (this.color ? (this.io[0x4f] & 1) * 8192 : 0)];
+      if (address < 0xa000) {
+        if (cpuAccess && this.mode() === 3) return 255;
+        return this.vram[(address & 0x1fff) + (this.color ? (this.io[0x4f] & 1) * 8192 : 0)];
+      }
       if (address < 0xc000) return this.cartridge.readRAM(address);
       if (address < 0xd000) return this.wram[address & 0xfff];
       if (address < 0xe000) return this.wram[this.wramBank() * 4096 + (address & 0xfff)];
-      if (address < 0xfe00) return this.read(address - 0x2000);
-      if (address < 0xfea0) return this.oam[address - 0xfe00];
+      if (address < 0xfe00) return this.read(address - 0x2000, cpuAccess);
+      if (address < 0xfea0) {
+        if (cpuAccess && this.mode() >= 2) return 255;
+        return this.oam[address - 0xfe00];
+      }
       if (address < 0xff00) return 255;
       if (address < 0xff80) return this.readIO(address & 127);
       if (address < 0xffff) return this.hram[address - 0xff80];
@@ -86,15 +92,15 @@
       if (index === 7) return this.io[index] | 0xf8;
       if (index === 0x0f) return this.io[index] | 0xe0;
       if (index >= 0x10 && index <= 0x3f) return this.apu.read(0xff00 | index);
-      if (index === 0x41) return 0x80 | (this.io[index] & 0x78) | (this.ly === this.io[0x45] ? 4 : 0) | this.mode();
-      if (index === 0x44) return this.ly;
+      if (index === 0x41) return 0x80 | (this.io[index] & 0x78) | (this.lcdLine() === this.io[0x45] ? 4 : 0) | this.mode();
+      if (index === 0x44) return this.lcdLine();
       if (index === 0x4d) return this.color ? 0x7e | (this.doubleSpeed ? 128 : 0) | (this.io[index] & 1) : 255;
       if (index === 0x4f) return this.color ? 0xfe | (this.io[index] & 1) : 255;
       if (index >= 0x51 && index <= 0x54) return 255;
       if (index >= 0x51 && index <= 0x55 && !this.color) return 255;
       if (index === 0x68 || index === 0x6a) return this.color ? this.io[index] | 0x40 : 255;
-      if (index === 0x69) return this.color ? this.bgPalette[this.io[0x68] & 63] : 255;
-      if (index === 0x6b) return this.color ? this.objPalette[this.io[0x6a] & 63] : 255;
+      if (index === 0x69) return this.color && this.mode() !== 3 ? this.bgPalette[this.io[0x68] & 63] : 255;
+      if (index === 0x6b) return this.color && this.mode() !== 3 ? this.objPalette[this.io[0x6a] & 63] : 255;
       if (index === 0x6c) return this.color ? this.io[index] | 0xfe : 255;
       if (index === 0x70) return this.color ? this.io[index] | 0xf8 : 255;
       if ([0x4c, 0x4e, 0x50, 0x56, 0x57].includes(index)
@@ -105,12 +111,16 @@
     write(address, value) {
       address &= 0xffff; value &= 255;
       if (address < 0x8000) this.cartridge.control(address, value);
-      else if (address < 0xa000) this.vram[(address & 0x1fff) + (this.color ? (this.io[0x4f] & 1) * 8192 : 0)] = value;
+      else if (address < 0xa000) {
+        if (this.mode() !== 3) this.vram[(address & 0x1fff) + (this.color ? (this.io[0x4f] & 1) * 8192 : 0)] = value;
+      }
       else if (address < 0xc000) this.cartridge.writeRAM(address, value);
       else if (address < 0xd000) this.wram[address & 0xfff] = value;
       else if (address < 0xe000) this.wram[this.wramBank() * 4096 + (address & 0xfff)] = value;
       else if (address < 0xfe00) this.write(address - 0x2000, value);
-      else if (address < 0xfea0) this.oam[address - 0xfe00] = value;
+      else if (address < 0xfea0) {
+        if (this.mode() < 2) this.oam[address - 0xfe00] = value;
+      }
       else if (address < 0xff00) return;
       else if (address < 0xff80) this.writeIO(address & 127, value);
       else if (address < 0xffff) this.hram[address - 0xff80] = value;
@@ -136,7 +146,7 @@
         const before = this.timerSignal();
         if (index === 4) this.div = 0;
         else this.io[7] = value & 7;
-        if (before && !this.timerSignal()) this.incrementTimer();
+        if (before && !this.timerSignal() && (index === 4 || !this.color || (value & 4))) this.incrementTimer();
         return;
       }
       if (index === 5) { this.io[5] = value; this.timerDelay = 0; return; }
@@ -157,7 +167,7 @@
       if (index === 0x45) { this.io[index] = value; this.updateSTAT(); return; }
       if (index === 0x46) {
         this.io[index] = value;
-        for (let i = 0; i < 160; i++) this.oam[i] = this.read((value << 8) + i);
+        for (let i = 0; i < 160; i++) this.oam[i] = this.read((value << 8) + i, false);
         this.stall += 640;
         return;
       }
@@ -168,7 +178,7 @@
       if (index === 0x69 || index === 0x6b) {
         const control = index - 1;
         const palette = index === 0x69 ? this.bgPalette : this.objPalette;
-        palette[this.io[control] & 63] = value;
+        if (this.mode() !== 3) palette[this.io[control] & 63] = value;
         if (this.io[control] & 128) this.io[control] = 128 | ((this.io[control] + 1) & 63);
         return;
       }
@@ -195,7 +205,7 @@
     transferBlock() {
       const bank = (this.io[0x4f] & 1) * 8192;
       for (let i = 0; i < 16; i++) {
-        this.vram[bank + ((this.hdmaDestination + i) & 8191)] = this.read((this.hdmaSource + i) & 0xffff);
+        this.vram[bank + ((this.hdmaDestination + i) & 8191)] = this.read((this.hdmaSource + i) & 0xffff, false);
       }
       this.hdmaSource = (this.hdmaSource + 16) & 0xffff;
       this.hdmaDestination = (this.hdmaDestination + 16) & 8191;
@@ -214,6 +224,10 @@
       this.div = 0;
       return true;
     }
+    lcdLine() {
+      // LY resets early on the last VBlank line; the PPU remains in mode 1.
+      return this.ly === 153 && this.dot >= 4 ? 0 : this.ly;
+    }
     mode() {
       if (!(this.io[0x40] & 128)) return 0;
       if (this.ly >= 144) return 1;
@@ -222,7 +236,7 @@
     updateSTAT() {
       const stat = this.io[0x41], mode = this.mode();
       const active = !!(this.io[0x40] & 128) && (
-        (this.ly === this.io[0x45] && (stat & 64))
+        (this.lcdLine() === this.io[0x45] && (stat & 64))
         || (mode === 0 && (stat & 8)) || (mode === 1 && (stat & 16)) || (mode === 2 && (stat & 32)));
       if (active && !this.statLine) this.interrupt(1);
       this.statLine = !!active;
@@ -247,6 +261,7 @@
         baseCycles++;
         if (this.io[0x40] & 128) {
           this.dot++;
+          if (this.ly === 153 && this.dot === 4) this.updateSTAT();
           if (this.dot === 80) this.updateSTAT();
           if (this.dot === 252 && this.ly < 144) {
             this.renderLine();
