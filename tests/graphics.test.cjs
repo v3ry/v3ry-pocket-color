@@ -3,10 +3,30 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { GameBoy } = require("../emulator.js");
-const { inspect } = require("../graphics.js");
+const { inspect, tileGrid } = require("../graphics.js");
 const States = require("../states.js");
 const { makeROM } = require("./helpers.cjs");
 const pixel = (image, x, y) => [...image.pixels.slice((y * image.width + x) * 4, (y * image.width + x) * 4 + 4)];
+
+test("3D tile grid decodes signed graphics from both banks with explicit palettes and stays read-only", () => {
+  const game = new GameBoy(makeROM({ color: true }));
+  game.vram[0x1000] = 128;
+  game.vram[8192 + 0x1000 + 1] = 128;
+  game.bgPalette.fill(0);
+  game.bgPalette.set([31, 0], 2);
+  game.bgPalette.set([224, 3], 8 + 4);
+  const before = States.capture(game, "0".repeat(64));
+  const grid = tileGrid(game, new Uint16Array([0, 0x180]), 2, 1);
+  assert.deepEqual(pixel(grid, 0, 0), [255, 0, 0, 255]);
+  assert.deepEqual(pixel(grid, 8, 0), [0, 255, 0, 255]);
+  const after = States.capture(game, "0".repeat(64)); after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+  assert.throws(() => tileGrid(game, [0], 2, 1), /Dimensions/);
+  assert.throws(() => tileGrid(game, [0], 0, 1), /Dimensions/);
+  assert.throws(() => tileGrid(game, [0], 33, 1), /Dimensions/);
+  assert.throws(() => tileGrid(game, [2048], 1, 1), /Tuile/);
+  assert.throws(() => tileGrid(game, [-1], 1, 1), /Tuile/);
+});
 
 test("graphics inspection is read-only, including pixels, window counter and mapper state", () => {
   for (const color of [false, true]) {

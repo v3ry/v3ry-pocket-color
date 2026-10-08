@@ -50,6 +50,62 @@ Le selecteur **Vitesse** propose x1, x2 et x4, y compris en plein ecran. Il mult
 
 **Capture PNG** telecharge l'image originale 160 x 144, sans interface, en jeu ou en pause. Le nom comprend celui de la ROM et un horodatage. La capture ne change ni la partie ni les sauvegardes.
 
+### Prototype 2.5D et presets
+
+Chargez **Pokemon Cristal UE version 1.1** ou **Aladdin GBC**, puis choisissez **Rendu > 2.5D**. Le mode 2D reste le choix par defaut. Le panneau **Camera et relief 2.5D / 3D** regle rotation, inclinaison, zoom, relief et ombrage ; Camera du preset retrouve les valeurs adaptees au jeu. Les reglages fonctionnent aussi en pause. Le selecteur reste accessible en plein ecran et permet de revenir instantanement en **2D original**, sans redemarrer.
+
+Le rendu utilise **WebGL natif**, sans moteur ni bibliotheque 3D. Le fond est un assemblage de tuiles extrudees et la fenetre GB/CGB reste un affichage fixe par-dessus la scene. Aladdin utilise une profondeur uniforme et un plan de sprites separe. Cristal reconstruit plusieurs hauteurs de decor et redresse les silhouettes de personnages. La capture des couches est activee uniquement en 2.5D ou 3D : elle observe les lignes du rendu original, conserve leurs palettes et respecte la transparence, la priorite et la limite de dix sprites par ligne. Cela preserve notamment les couleurs raster de l'introduction d'Aladdin. Les sprites visibles devant la fenetre sont conserves avec cet affichage fixe.
+
+Les textures proviennent de la derniere image complete. A l'activation ou apres un chargement d'etat, l'image originale sert provisoirement de plan unique jusqu'a la prochaine image complete ; en pause, reprendre le jeu permet de reconstruire les couches. Le rendu 2.5D est limite a 30 actualisations par seconde, sans changer le budget du coeur. Son cout et la fluidite dependent du GPU et du navigateur. Si WebGL est absent, echoue ou perd son contexte, un message explique le retour au mode 2D ; la partie continue.
+
+**C'est un prototype visuel, pas une conversion automatique en vrai jeu 3D.** Les collisions, la physique, les commandes et les sauvegardes restent celles du jeu 2D. Les personnages sont des silhouettes pixelisees inclinees et surelevees, pas des modeles 3D. La geometrie utilise les registres de scroll et les identifiants de tuiles actuels : les changements de scroll ou de carte par ligne ne sont pas reconstruits en geometrie, meme si leurs pixels sont conserves. Une fenetre utilisee comme decor plutot que comme HUD peut paraitre detachee. Camera et mode de rendu ne sont pas inclus dans les etats. Les captures PNG restent en 2D originale.
+
+**Cristal : un relief non uniforme.** Le preset `preset/pokemon-crystal.js` lit les pointeurs de tileset et les blocs proches dans la banque physique WRAM 1, puis les definitions graphiques et collisions dans la ROM de l'utilisateur. Il compare des groupes de 2 x 2 tuiles, avec leur banque VRAM, plutot que d'attribuer une hauteur arbitraire a un identifiant de tuile reutilisable :
+
+Ses reglages par defaut sont : rotation **0 degre**, inclinaison **-20 degres**, zoom **83 %**, relief **14** et ombrage **73 %**. **Camera du preset** restaure ces cinq valeurs.
+
+- Sol a hauteur zero ; murs/obstacles/arbres a 20 unites, mobilier interactif a 12, rebords a 5, herbe a 2 et eau a -2, avant multiplication par **Relief / 8**.
+- Les faces laterales relient les obstacles au sol. Les bordures uniformes hors carte sont masquees pour eviter une enorme plaque de vide surelevee.
+- Les silhouettes disjointes du calque sprites ont chacune leur pied et une hauteur progressive vers leur tete. La transparence est preservee ; deux silhouettes tres proches peuvent encore etre groupees.
+- Au moins **85 % de la surface visible** doit correspondre aux definitions de carte. Sinon le preset affiche exactement les pixels 2D sans perspective et le signale : titres, menus, combats et transitions restent lisibles. Le relief revient automatiquement quand la carte est reconnue.
+
+Cette classification est une **approximation par collision**, pas une identification precise des toits et facades : un mur et une cime d'arbre peuvent avoir la meme hauteur, une porte peut rester au sol, et des graphismes ambigus utilisent la plus petite hauteur connue. Les pointeurs, dimensions et limites ROM/WRAM sont controles. La disposition memoire a ete verifiee sur **Cristal UE 1.1** ; Cristal 1.0, Or, Argent et les ROM modifiees ne sont pas certifies et n'ont pas de preset equivalent. Aucune ROM, table graphique ou sauvegarde n'est embarquee.
+
+References de format : [blocs et collisions](https://github.com/pret/pokecrystal/blob/master/data/tilesets.asm), [types de collision](https://github.com/pret/pokecrystal/blob/master/constants/collision_constants.asm), [chargement de carte](https://github.com/pret/pokecrystal/blob/master/home/map.asm). L'analyse et le renderer du projet restent implementes ici, sans code d'emulation externe.
+
+Les reglages propres aux jeux sont dans **`preset/`** :
+
+- `match` selectionne le titre interne, le mode CGB et le type de cartouche, jamais le nom du fichier. `revision` peut exiger l'octet de revision ROM (1 pour Cristal 1.1). Ce n'est pas une certification des ROM modifiees.
+- `camera` definit `yaw` (-45 a 45 degres), `pitch` (-35 a 35) et `zoom` (0,5 a 1,3).
+- `backgroundDepth` et `spriteDepth` separent les plans ; `thickness` (0 a 16) definit l'extrusion vers l'arriere pour Aladdin, ou l'intensite du relief pour Cristal.
+- `light` definit l'ombrage initial entre 0 et 1 ; sans valeur, l'ombrage reste a 0,75.
+- `tileDepths` associe une cle `"banque VRAM:identifiant de tuile"` a un decalage de profondeur entre -32 et 32. Par exemple, `"1:42": 6` avance la tuile 42 de banque 1 de six unites. Les identifiants peuvent changer de contenu selon les scenes : des regles semantiques demandent une analyse specifique du jeu.
+- `terrain(game)` peut fournir une carte de profondeurs 32 x 32 avec `active`, `reason`, `depths` et un masque `hidden`. Ses profondeurs sont multipliees par Relief / 8 et doivent rester dans [-64, 64] apres multiplication. `active: false` conserve la vue originale et affiche `reason`. `raisedSprites` active le relief par silhouette, uniquement quand la carte est reconnue.
+
+Pour ajouter un preset, declarez-le dans `PocketPresets`, chargez son script avant `app.js` dans `index.html` et ajoutez-le aux fichiers caches de `sw.js` avec une nouvelle version de cache. Ces scripts ordinaires fonctionnent aussi en ouverture locale, sans serveur ni chargement externe.
+
+### Mode 3D : tous les types de lieux de Cristal
+
+Dans **Cristal UE 1.1**, choisissez **Rendu > 3D - Cristal**. Le mode suit automatiquement les cartes explorables reconnues : villes, routes, interieurs, grottes, passages, donjons et environnement special. Les 36 tilesets et les sept categories d'environnement ont le meme chemin de reconstruction, sans liste de cartes a autoriser individuellement. Cela ne certifie pas une visite exhaustive de chaque carte du jeu.
+
+**Bourg Geon conserve son preset detaille** : sol horizontal, arbres a tronc et cime en volume, quatre maisons avec toits a deux pentes, panneaux debout et ombres geometriques. **Ailleurs, le rendu est generique** : les blocs locaux actifs en WRAM donnent une grille de 6 x 5 metatuiles (192 x 160 pixels), reconstruite avec les definitions graphiques de la ROM, les pixels VRAM et les palettes actuelles. Chaque secteur de 16 x 16 pixels est pose horizontalement a une hauteur derivee de sa collision ; obstacles et mobilier ont des faces laterales texturees, l'eau est abaissee et les personnages sont debout.
+
+`world.js` partage le renderer WebGL et l'extraction de silhouettes avec le mode 2.5D. Ses modeles et petites textures pixelisees sont generes ici, sans moteur externe, images copiees ou donnees de ROM embarquees. Le preset `preset/pokemon-crystal.js` identifie la carte 24/4, tileset 1, 10 x 9 blocs, et lit les **blocs actifs en WRAM**, pas une carte statique embarquee. Les blocages et entrees restent ceux de l'emulation. Les portes sont placees aux colonnes d'entree du decor original.
+
+- Les controles de camera restent les memes. Bourg Geon ajoute 40 degres d'inclinaison et multiplie le zoom par 0,6 pour ouvrir le paysage ; les cartes generiques ajoutent 25 degres et multiplient le zoom par 0,9 pour mieux cadrer la region locale. Les cinq valeurs preferees du mode 2.5D restent inchangees. Relief 14 correspond a l'echelle normale des modeles et personnages.
+- Les blocs non classes par le preset detaille de Bourg Geon passent au rendu generique. **Start conserve le decor 3D** dans toute carte reconnue : menu et description fixes, pixels et commandes du jeu. Les sous-menus plein ecran, combats et cartes graphiques non reconnus reviennent aux pixels originaux. Les dialogues utilisant la fenetre restent fixes et lisibles. Pointeurs invalides, LCD eteint, transitions ou moins de 85 % de terrain reconnu gardent un retour explicite au rendu precedent/original.
+- La camera suit SCX/SCY par rapport a l'ancrage graphique de destination, y compris lors d'un deplacement vers la gauche/le haut et du bouclage 255/0. Cela evite les sauts de 16 pixels dus a la preparation anticipee des blocs. Sol et modeles statiques sont reutilises tant que leurs donnees ne changent pas ; seul le decalage de camera est transmis au shader. Les silhouettes et ombres des personnages restent actualisees.
+- Les cinq passes (sol, modeles, ombres, personnages, interface) ont leurs propres buffers GPU et textures. Les sommets et textures inchanges ne sont pas retransmis ; les modeles, ombres et menus ne remplacent plus mutuellement leur texture. Ce cache reste borne a cinq buffers et cinq textures, liberes a la fermeture du renderer. Il reduit les transferts, sans garantir un gain de FPS si le cout dominant vient de l'emulation.
+- **Reconstruction approximative, pas une conversion du jeu en 3D native.** Hors de Bourg Geon, les toits, arbres, rochers et meubles restent des secteurs textures sureleves, pas des modeles semantiques comme les maisons detaillees. Les palettes de tuiles sont deduites par vote dans la carte VRAM ; une tuile absente utilise la palette 0, donc certaines couleurs peuvent differer. Les animations de tuiles et changements de palettes invalident le cache. Les graphismes modifies par ligne ne sont pas reconstruits dans les textures generiques.
+- Le terrain couvre la ville entiere a Bourg Geon et une **region locale renouvelee pendant le deplacement** ailleurs. Le bord de cette region reste visible avec une camera large. Seuls les personnages visibles dans l'image Game Boy sont disponibles : ils peuvent apparaitre/disparaitre au bord du champ, etre tronques ou regroupes s'ils se touchent. Les sprites caches par le decor 2D ne sont pas recuperes. Il ne s'agit pas encore d'une camera libre explorant un monde complet.
+- Aucun changement de physique, de collision, de sauvegarde ou d'etat. Le rendu reste opt-in, plafonne a 30 Hz et fonctionne hors ligne ; les captures PNG restent celles de la 2D originale.
+
+Les conversations utilisant la boite de texte standard de Cristal (six rangees en bas de l'ecran) gardent le decor 3D, detaille ou generique. Le cadre, le texte anime et l'indicateur de suite restent fixes en surimpression avec les pixels du jeu. La reconnaissance verifie tout le cadre et le terrain restant : un combat, un menu plein ecran ou une boite non reconnue conserve le retour en 2D.
+
+Un preset peut exposer `world(game)` avec `active`, `reason`, les dimensions en blocs, `blocks` (tableau ligne par ligne), `ground` (materiaux et berges par bloc), `objects` (arbres, maisons et panneaux avec leurs positions), `originX`/`originY` en pixels et un masque `overlay` optionnel de 160 x 144 pixels pour l'interface. Toutes les classifications propres a Bourg Geon restent dans **`preset/pokemon-crystal.js`**, pas dans le renderer partage. Ajouter d'autres jeux/cartes necessite leur propre classification, pas seulement activer ce champ.
+
+La variante `generic: true` fournit `tiles` (24 x 20 codes avec identifiant/banque VRAM dans l'octet bas et palette dans les bits 8-10) et `surfaces` (positions et hauteurs de secteurs 16 x 16). `zoomFactor`, `pitchOffset` et `clearColor` adaptent le cadrage et le fond ; les interieurs et grottes utilisent un fond sombre. Les tables propres a Cristal restent dans son preset et `graphics.js` decode les textures en lecture seule.
+
 ### Application installable et hors ligne
 
 Sous **HTTPS ou localhost**, le lecteur prepare automatiquement ses fichiers pour une utilisation hors ligne. Attendez le message **Application prete hors ligne** avant de couper la connexion. Installez-le avec le bouton propose par les navigateurs compatibles, ou depuis leur menu (sur iOS : Partager puis Sur l'ecran d'accueil). La disponibilite de l'installation depend du navigateur ; le lecteur reste utilisable sans installation.
@@ -78,6 +134,7 @@ L'actualisation en direct est limitee a 5 Hz et ne travaille pas lorsque le pann
 - `saves.js` : stockage IndexedDB par empreinte SHA-256 de la ROM, commits serialises et restauration RAM/RTC.
 - `states.js` : instantanes versionnes CPU, bus, video, DMA, audio, cartouche et RTC ; validation avant restauration.
 - `graphics.js` : inspection video en lecture seule et reconstruction des couches avec le rendu partage.
+- `scene.js`, `preset/aladdin.js`, `preset/pokemon-crystal.js` : geometrie, camera et rendu WebGL 2.5D ; classification du relief Cristal par collisions.
 - `pwa.js`, `sw.js`, `manifest.webmanifest` : installation, cache hors ligne limite aux fichiers de l'application et mises a jour sans interruption de partie.
 - `app.js` : chargement local, choix dans les archives, canvas, boucle temps reel et commandes.
 
@@ -142,9 +199,11 @@ Les tests inclus utilisent des ROM synthetiques creees pour ce projet, pas des j
 Avec Node.js recent (22 ou plus) :
 
 ```sh
-node --test tests/app.test.cjs tests/cpu.test.cjs tests/emulator.test.cjs tests/graphics.test.cjs tests/pwa.test.cjs tests/zip.test.cjs tests/saves.test.cjs tests/states.test.cjs
+node --test tests/app.test.cjs tests/cpu.test.cjs tests/emulator.test.cjs tests/graphics.test.cjs tests/scene.test.cjs tests/pwa.test.cjs tests/zip.test.cjs tests/saves.test.cjs tests/states.test.cjs
 ```
 
 Les tests couvrent le processeur (dont les immediats signes SP), les banques de cartouche, les quatre frequences timer, le DMA progressif et ses conflits de bus, les penalites video, la fenetre, DIV-APU, la cadence video/audio CGB en double vitesse, l'inspecteur en lecture seule, la migration et la restauration des etats, les commandes et les archives ZIP (stockees et compressees, multiples ROM, CRC et fichiers invalides). L'interface est aussi testee avec un DOM minimal : activation initiale du son, volume, preferences clavier, manettes, plein ecran, reprise automatique apres restauration, emplacements d'etat, historique RAM, FPS, erreurs d'emulation et chargements concurrents.
+
+Les tests 2.5D couvrent la selection des presets/revisions, les UV, le clipping et le bouclage de carte, l'extrusion, les palettes par ligne, la recomposition exacte des couches, les limites/priorites des sprites, la conservation des etats, les reglages en pause et les replis WebGL. Les tests Cristal verifient les hauteurs distinctes, les silhouettes independantes, la limite de reconnaissance a 85 %, les banques et bornes memoire, et les menus sans perspective. Le pipeline WebGL est teste avec un contexte simule ; la compilation des shaders et le rendu reel doivent aussi etre verifies dans un navigateur.
 
 Utilisez uniquement des ROM que vous etes autorise a utiliser.

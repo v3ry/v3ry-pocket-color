@@ -11,6 +11,9 @@ const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./helpers.cj
 const { SaveSession } = require("../saves.js");
 const States = require("../states.js");
 const Graphics = require("../graphics.js");
+const Scene = require("../scene.js");
+const AladdinPreset = require("../preset/aladdin.js");
+const CrystalPreset = require("../preset/pokemon-crystal.js");
 
 class Element {
   constructor() {
@@ -87,6 +90,11 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
     PocketGraphics: Graphics,
+    PocketPresets: [AladdinPreset, CrystalPreset],
+    PocketScene: { ...Scene, Renderer: class {
+      render(game, preset, camera, mode) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneMode = mode; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360 }; }
+      dispose() { scope.sceneDisposed = true; }
+    } },
     Uint8Array, AudioContext, ImageData: class { constructor(data) { this.data = data; } },
     Blob, URL: {
       createObjectURL: blob => { downloads.push(blob); return "blob:test"; },
@@ -239,6 +247,146 @@ test("graphics inspector renders only when open and refreshes while paused witho
   await load(h, "demo.gb", makeDemoROM(false));
   assert.equal(h.element("#graphics-bank").disabled, true);
   assert.match(h.element("#graphics-status").textContent, /GB/);
+});
+
+test("2.5D is opt-in and switches back to original 2D without restarting or mutating the game", async () => {
+  const h = harness();
+  await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  assert.equal(h.element("#scene-option").disabled, false);
+  assert.equal(h.element("#world-option").disabled, true);
+  assert.equal(h.element("#render-mode").value, "2d");
+  const game = h.evaluate("emulator"), before = States.capture(game, "0".repeat(64));
+  h.element("#render-mode").value = "2.5d";
+  h.element("#render-mode").fire("change");
+  assert.equal(h.element("#scene-canvas").hidden, false);
+  assert.notEqual(game.videoLayers(), null);
+  assert.equal(h.scope.sceneRenders, 1);
+  h.element("#scene-yaw").value = "30";
+  h.element("#scene-yaw").fire("input");
+  assert.equal(h.evaluate("sceneCamera.yaw"), 30);
+  h.element("#scene-reset").fire("click");
+  assert.equal(h.evaluate("sceneCamera.yaw"), -18);
+  assert.equal(h.evaluate("sceneCamera.light"), 0.75);
+  h.element("#render-mode").value = "2d";
+  h.element("#render-mode").fire("change");
+  assert.equal(h.element("#scene-canvas").hidden, true);
+  assert.equal(game.videoLayers(), null);
+  assert.equal(h.evaluate("emulator"), game);
+  const after = States.capture(game, "0".repeat(64));
+  after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+  assert.equal(h.evaluate("paused"), false);
+  assert.equal(h.pending.size, 1);
+});
+
+test("automatic 2.5D rendering is capped at 30 Hz and stops work in original 2D", async () => {
+  const h = harness();
+  let time = 0;
+  h.scope.performance = { now: () => time };
+  await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  h.element("#render-mode").value = "2.5d";
+  h.element("#render-mode").fire("change");
+  for (time = 1; time < 1000; time++) h.evaluate("draw()");
+  assert.equal(h.scope.sceneRenders, 30);
+  h.element("#render-mode").value = "2d";
+  h.element("#render-mode").fire("change");
+  for (time = 1000; time < 2000; time++) h.evaluate("draw()");
+  assert.equal(h.scope.sceneRenders, 30);
+  assert.equal(h.evaluate("emulator.videoLayers()"), null);
+});
+
+test("Crystal 1.1 selects its own camera and relief without affecting pause or saves", async () => {
+  const h = harness(), rom = makeROM({ color: true, type: 0x10, sizeCode: 6, ramSize: 3, program: [0x18, 0xfe] });
+  rom.fill(0, 0x134, 0x143);
+  rom.set(Buffer.from("PM_CRYSTAL"), 0x134); rom[0x14c] = 1;
+  let checksum = 0;
+  for (let i = 0x134; i <= 0x14c; i++) checksum = (checksum - rom[i] - 1) & 255;
+  rom[0x14d] = checksum;
+  await load(h, "test.gbc", rom);
+  assert.equal(h.evaluate("scenePreset.id"), CrystalPreset.id);
+  assert.equal(h.element("#scene-option").disabled, false);
+  assert.equal(h.element("#world-option").disabled, false);
+  await h.element("#pause-button").fire("click");
+  const game = h.evaluate("emulator"), before = States.capture(game, "0".repeat(64));
+  const saves = structuredClone(h.store.records);
+  h.element("#render-mode").value = "2.5d"; h.element("#render-mode").fire("change");
+  const defaults = { yaw: 0, pitch: -20, zoom: 0.83, thickness: 14, light: 0.73 };
+  for (const [key, value] of Object.entries(defaults)) {
+    assert.equal(h.evaluate(`sceneCamera.${key}`), value);
+    assert.equal(h.element(`#scene-${key}`).value, String(Math.round(value * (["zoom", "light"].includes(key) ? 100 : 1))));
+  }
+  h.element("#scene-light").value = "10"; h.element("#scene-light").fire("input");
+  h.element("#scene-reset").fire("click");
+  for (const [key, value] of Object.entries(defaults)) assert.equal(h.evaluate(`sceneCamera.${key}`), value);
+  h.element("#render-mode").value = "3d"; h.element("#render-mode").fire("change");
+  assert.equal(h.scope.sceneMode, "3d");
+  assert.equal(h.element("#scene-canvas").hidden, false);
+  h.element("#scene-reset").fire("click");
+  for (const [key, value] of Object.entries(defaults)) assert.equal(h.evaluate(`sceneCamera.${key}`), value);
+  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.pending.size, 0);
+  assert.deepEqual(h.store.records, saves);
+  const after = States.capture(game, "0".repeat(64)); after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+  await h.element("#pause-button").fire("click");
+  assert.equal(h.evaluate("paused"), false);
+  h.element("#render-mode").value = "2.5d"; h.element("#render-mode").fire("change");
+  assert.equal(h.scope.sceneMode, "2.5d");
+  assert.equal(h.pending.size, 1);
+  await load(h, "aladdin.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  assert.equal(h.element("#world-option").disabled, true);
+  h.element("#render-mode").value = "3d"; h.element("#render-mode").fire("change");
+  assert.equal(h.element("#render-mode").value, "2d");
+  assert.match(h.element("#scene-status").textContent, /aucun preset 3D/);
+  assert.equal(h.evaluate("paused"), false);
+});
+
+test("unsupported ROMs and rendering failures fall back explicitly without stopping emulation", async () => {
+  const h = harness();
+  await load(h, "demo.gb", makeDemoROM(false));
+  assert.equal(h.element("#scene-option").disabled, true);
+  h.element("#render-mode").value = "2.5d";
+  h.element("#render-mode").fire("change");
+  assert.equal(h.element("#render-mode").value, "2d");
+  assert.match(h.element("#scene-status").textContent, /indisponible/);
+  await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  h.scope.failScene = true;
+  h.element("#render-mode").value = "2.5d";
+  h.element("#render-mode").fire("change");
+  assert.equal(h.element("#render-mode").value, "2d");
+  assert.equal(h.element("#scene-canvas").hidden, true);
+  assert.match(h.element("#scene-status").textContent, /WebGL failed/);
+  assert.equal(h.scope.sceneDisposed, true);
+  assert.equal(h.evaluate("paused"), false);
+  assert.equal(h.pending.size, 1);
+  assert.equal(h.errors.length, 1);
+});
+
+test("2.5D camera works paused, rejects invalid values and handles context loss", async () => {
+  const h = harness();
+  await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  await h.element("#pause-button").fire("click");
+  h.element("#render-mode").value = "2.5d";
+  h.element("#render-mode").fire("change");
+  h.element("#scene-zoom").value = "110";
+  h.element("#scene-zoom").fire("input");
+  assert.equal(h.evaluate("sceneCamera.zoom"), 1.1);
+  assert.equal(h.pending.size, 0);
+  h.element("#scene-yaw").value = "100";
+  h.element("#scene-yaw").fire("input");
+  assert.match(h.element("#scene-status").textContent, /refusé/);
+  assert.equal(h.evaluate("sceneCamera.yaw"), -18);
+  let prevented = false;
+  h.element("#scene-canvas").fire("webglcontextlost", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(h.element("#render-mode").value, "2d");
+  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.scope.sceneDisposed, true);
 });
 
 test("fullscreen enters/exits natively and browser Escape updates the button", async () => {

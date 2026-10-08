@@ -128,6 +128,7 @@
     game.apu.channels.forEach((channel, index) => Object.assign(channel, data.audio.channels[index]));
     game.apu.highpass = [...data.audio.highpass];
     game.apu.samples.length = 0;
+    game.invalidateVideoLayers();
   }
   function encode(data) {
     const text = JSON.stringify(data);

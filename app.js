@@ -32,6 +32,14 @@ const graphicsStatus = document.querySelector("#graphics-status");
 let graphicsTime = -Infinity;
 let graphicsGame = null;
 let graphicsFailed = false;
+const sceneCanvas = document.querySelector("#scene-canvas");
+const sceneStatus = document.querySelector("#scene-status");
+const renderMode = document.querySelector("#render-mode");
+let sceneRenderer = null;
+let sceneGame = null;
+let scenePreset = null;
+let sceneTime = -Infinity;
+let sceneCamera = { yaw: -18, pitch: 10, zoom: 0.9, thickness: 4, light: 0.75 };
 const archivePicker = document.querySelector("#archive-picker");
 const archiveSelect = document.querySelector("#archive-rom");
 const archiveOpen = document.querySelector("#archive-open");
@@ -473,8 +481,112 @@ for (const name of ["bank", "palette", "object", "background", "window", "sprite
 }
 document.querySelector("#graphics-refresh").addEventListener("click", () => updateGraphics(true));
 
+function sceneMessage(message, error = false) {
+  sceneStatus.textContent = message;
+  sceneStatus.classList.toggle("is-error", error);
+  if (error) showFullscreenMessage(message, true);
+}
+function cameraControls() {
+  for (const key of ["yaw", "pitch", "zoom", "thickness", "light"]) {
+    const percent = key === "zoom" || key === "light";
+    const value = Math.round(sceneCamera[key] * (percent ? 100 : 1));
+    document.querySelector(`#scene-${key}`).value = String(value);
+    document.querySelector(`#scene-${key}-value`).textContent =
+      `${value}${percent ? " %" : key === "yaw" || key === "pitch" ? "°" : ""}`;
+  }
+}
+function resetSceneCamera() {
+  sceneCamera = { ...(scenePreset?.camera || { yaw: -18, pitch: 10, zoom: 0.9 }),
+    thickness: scenePreset?.thickness ?? 4, light: scenePreset?.light ?? 0.75 };
+  cameraControls();
+}
+function returnTo2D(message, error = false) {
+  emulator?.setVideoCapture(false);
+  renderMode.value = "2d";
+  sceneCanvas.hidden = true;
+  sceneCanvas.setAttribute("aria-hidden", "true");
+  sceneMessage(message, error);
+}
+function updateScene(force = false) {
+  if (sceneGame !== emulator) {
+    sceneGame?.setVideoCapture(false);
+    sceneGame = emulator;
+    scenePreset = emulator ? PocketScene.selectPreset(emulator, PocketPresets) : null;
+    const option = document.querySelector("#scene-option");
+    option.disabled = !scenePreset;
+    option.textContent = scenePreset ? `2.5D · ${scenePreset.label || scenePreset.match.title}` : "2.5D · preset requis";
+    document.querySelector("#world-option").disabled = !scenePreset?.world;
+    if (renderMode.value === "3d" && scenePreset && !scenePreset.world) renderMode.value = "2.5d";
+    resetSceneCamera();
+    if (!scenePreset) returnTo2D(emulator
+      ? "Aucun preset 2.5D pour cette ROM : rendu 2D conservé."
+      : "Prototype 2.5D : chargez Pokémon Cristal UE 1.1 ou Aladdin GBC pour activer un preset.");
+    else sceneMessage(`Preset disponible : ${scenePreset.name}. Choisissez le rendu 2.5D${scenePreset.world ? " ou 3D" : ""} pour l’activer.`);
+    force = true;
+  }
+  if (!["2.5d", "3d"].includes(renderMode.value)) return;
+  if (!emulator || !scenePreset) {
+    returnTo2D("Rendu 2.5D indisponible : aucun preset compatible avec le jeu chargé.", true);
+    return;
+  }
+  if (renderMode.value === "3d" && !scenePreset.world) {
+    returnTo2D("Rendu 3D indisponible : aucun preset 3D pour ce jeu.", true);
+    return;
+  }
+  const now = performance.now();
+  if (!force && now - sceneTime < 1000 / 30) return;
+  sceneTime = now;
+  try {
+    emulator.setVideoCapture(true);
+    if (!sceneRenderer) sceneRenderer = new PocketScene.Renderer(sceneCanvas);
+    const result = sceneRenderer.render(emulator, scenePreset, sceneCamera, renderMode.value);
+    sceneCanvas.hidden = false;
+    sceneCanvas.setAttribute("aria-hidden", "false");
+    sceneMessage(`${scenePreset.name} · ${result.detail || `${result.tiles} tuiles`} · rendu ≤30 Hz · jeu et sauvegardes inchangés.`);
+  } catch (error) {
+    if (sceneRenderer) { sceneRenderer.dispose(); sceneRenderer = null; }
+    returnTo2D(`Rendu 2.5D arrêté : ${error.message} Retour au rendu 2D.`, true);
+    console.error(error);
+  }
+}
+renderMode.value = "2d";
+renderMode.addEventListener("change", () => {
+  if (!["2d", "2.5d", "3d"].includes(renderMode.value)) {
+    returnTo2D("Mode de rendu invalide. Retour au rendu 2D.", true);
+    return;
+  }
+  if (renderMode.value === "2d") returnTo2D("Rendu 2D original rétabli, sans redémarrage de la partie.");
+  else updateScene(true);
+  canvas.focus();
+});
+for (const key of ["yaw", "pitch", "zoom", "thickness", "light"]) {
+  document.querySelector(`#scene-${key}`).addEventListener("input", () => {
+    const next = { ...sceneCamera, [key]: Number(document.querySelector(`#scene-${key}`).value) / (key === "zoom" || key === "light" ? 100 : 1) };
+    try {
+      PocketScene.validateCamera(next);
+      sceneCamera = next;
+      cameraControls();
+      updateScene(true);
+    } catch (error) {
+      cameraControls();
+      sceneMessage(`Réglage refusé : ${error.message}`, true);
+      console.error(error);
+    }
+  });
+}
+document.querySelector("#scene-reset").addEventListener("click", () => {
+  resetSceneCamera();
+  updateScene(true);
+});
+sceneCanvas.addEventListener("webglcontextlost", event => {
+  event.preventDefault();
+  if (sceneRenderer) { sceneRenderer.dispose(); sceneRenderer = null; }
+  returnTo2D("Contexte WebGL perdu : rendu 2D rétabli. Réessayez la 2.5D après restauration du contexte.", true);
+});
+
 function draw() {
   context.putImageData(new ImageData(emulator.pixels, 160, 144), 0, 0);
+  updateScene();
   updateGraphics();
 }
 

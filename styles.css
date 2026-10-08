@@ -284,7 +284,7 @@ body.is-immersive {
   background: #101b14;
 }
 
-.player-column.is-immersive > :not(.screen-shell):not([aria-label="Actions du lecteur"]):not(.touch-controls):not(#fullscreen-status):not(#fps-status):not(#comfort-status) {
+.player-column.is-immersive > :not(.screen-shell):not([aria-label="Actions du lecteur"]):not(.touch-controls):not(#fullscreen-status):not(#fps-status):not(#comfort-status):not(#scene-status) {
   display: none;
 }
 
@@ -311,7 +311,8 @@ body.is-immersive {
   box-shadow: none;
 }
 
-.is-immersive #game-canvas {
+.is-immersive #game-canvas,
+.is-immersive #scene-canvas {
   object-fit: contain;
 }
 
@@ -425,6 +426,15 @@ body.is-immersive {
   background: #101b14;
   image-rendering: pixelated;
 }
+#scene-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+#scene-canvas[hidden] { display: none; }
 
 .archive-picker {
   margin-top: 12px;
@@ -531,8 +541,10 @@ body.is-immersive {
 .volume-control output { min-width: 40px; }
 .speed-control { display: flex; align-items: center; gap: 6px; font-size: 11px; }
 .is-immersive .speed-control,
-.is-immersive #comfort-status { color: #b7c9b6; }
-.is-immersive #comfort-status { margin: 0; }
+.is-immersive #comfort-status,
+.is-immersive #scene-status { color: #b7c9b6; }
+.is-immersive #comfort-status,
+.is-immersive #scene-status { margin: 0; }
 .is-immersive .volume-control { color: #b7c9b6; }
 .is-immersive #fps-status { color: #b7c9b6; margin: 0; }
 

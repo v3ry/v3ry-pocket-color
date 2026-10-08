@@ -5,6 +5,11 @@
   const Cartridge = typeof module !== "undefined" && module.exports ? require("./cartridge.js").Cartridge : root.PocketCartridge;
   const APU = typeof module !== "undefined" && module.exports ? require("./audio.js").APU : root.PocketAPU;
   const SHADES = [[232, 240, 208], [136, 176, 112], [52, 104, 86], [16, 40, 40]];
+  const VIDEO_LAYERS = new WeakMap();
+  function layerBuffers() {
+    return { background: new Uint8ClampedArray(160 * 144 * 4),
+      sprites: new Uint8ClampedArray(160 * 144 * 4), window: new Uint8ClampedArray(160 * 144 * 4) };
+  }
 
   class GameBoy {
     constructor(bytes, sampleRate = 48000) {
@@ -19,6 +24,7 @@
       this.objPalette = new Uint8Array(64).fill(255);
       this.pixels = new Uint8ClampedArray(160 * 144 * 4);
       this.pixels.fill(255);
+      this.invalidateVideoLayers();
       this.cpu = new CPU(this, this.color);
       this.apu = new APU(sampleRate);
       this.ie = 0;
@@ -56,6 +62,31 @@
       this.updateSTAT();
     }
     interrupt(bit) { this.io[0x0f] |= 1 << bit; }
+    invalidateVideoLayers() {
+      const enabled = VIDEO_LAYERS.get(this)?.enabled || false;
+      VIDEO_LAYERS.set(this, { writing: layerBuffers(), ready: layerBuffers(), valid: false, enabled,
+        lines: new Uint8Array(144), lineCount: 0 });
+    }
+    setVideoCapture(enabled) {
+      const layers = VIDEO_LAYERS.get(this);
+      if (layers.enabled !== enabled) {
+        layers.enabled = enabled;
+        layers.valid = false;
+        layers.lines.fill(0);
+        layers.lineCount = 0;
+      }
+    }
+    videoLayers() {
+      const layers = VIDEO_LAYERS.get(this);
+      if (!layers?.enabled) return null;
+      if (!layers.valid) {
+        return { background: { width: 160, height: 144, pixels: this.pixels.slice() },
+          sprites: { width: 160, height: 144, pixels: new Uint8ClampedArray(this.pixels.length) },
+          window: { width: 160, height: 144, pixels: new Uint8ClampedArray(this.pixels.length) } };
+      }
+      return Object.fromEntries(Object.entries(layers.ready).map(([key, pixels]) =>
+        [key, { width: 160, height: 144, pixels: pixels.slice() }]));
+    }
     pendingInterrupts() { return this.ie & this.io[0x0f] & 31; }
     acknowledgeInterrupt(bit) { this.io[0x0f] &= ~(1 << bit); }
     joypad() {
@@ -188,6 +219,7 @@
           this.oamScanBlocked = false;
           this.statLine = false;
           if (!(value & 128)) this.pixels.fill(255);
+          this.invalidateVideoLayers();
           this.updateSTAT();
         }
         return;
@@ -356,7 +388,18 @@
             this.ly++;
             this.mode3End = 252;
             this.oamScanBlocked = false;
-            if (this.ly === 144) { this.interrupt(0); this.frames++; this.windowTriggered = false; }
+            if (this.ly === 144) {
+              this.interrupt(0); this.frames++; this.windowTriggered = false;
+              const layers = VIDEO_LAYERS.get(this);
+              if (layers.enabled) {
+                if (layers.lineCount === 144) {
+                  [layers.ready, layers.writing] = [layers.writing, layers.ready];
+                  layers.valid = true;
+                }
+                layers.lines.fill(0);
+                layers.lineCount = 0;
+              }
+            }
             if (this.ly === 154) { this.ly = 0; this.windowLine = 0; }
             if (this.ly < 144 && this.ly === this.io[0x4a]) this.windowTriggered = true;
             this.updateSTAT();
@@ -384,23 +427,31 @@
       const low = this.vram[bank + offset + y * 2], high = this.vram[bank + offset + y * 2 + 1];
       return ((low >> (7 - x)) & 1) | (((high >> (7 - x)) & 1) << 1);
     }
-    paint(x, color, palette, object = false) {
+    paint(x, color, palette, object = false, pixels = this.pixels) {
       const offset = (this.ly * 160 + x) * 4;
       if (this.color) {
         const data = object ? this.objPalette : this.bgPalette, index = palette * 8 + color * 2;
         const rgb = data[index] | (data[index + 1] << 8);
-        this.pixels[offset] = Math.round((rgb & 31) * 255 / 31);
-        this.pixels[offset + 1] = Math.round(((rgb >> 5) & 31) * 255 / 31);
-        this.pixels[offset + 2] = Math.round(((rgb >> 10) & 31) * 255 / 31);
+        pixels[offset] = Math.round((rgb & 31) * 255 / 31);
+        pixels[offset + 1] = Math.round(((rgb >> 5) & 31) * 255 / 31);
+        pixels[offset + 2] = Math.round(((rgb >> 10) & 31) * 255 / 31);
       } else {
         const register = object ? this.io[palette ? 0x49 : 0x48] : this.io[0x47];
         const shade = SHADES[(register >> (color * 2)) & 3];
-        this.pixels.set(shade, offset);
+        pixels.set(shade, offset);
       }
-      this.pixels[offset + 3] = 255;
+      pixels[offset + 3] = 255;
     }
     renderLine({ background = true, window = true, sprites: showSprites = true, useLineState = false } = {}) {
       const lcd = this.io[0x40], bgColors = new Uint8Array(160), bgPriority = new Uint8Array(160);
+      const capture = useLineState ? VIDEO_LAYERS.get(this) : null;
+      const layers = capture?.enabled ? capture.writing : null;
+      const lineOffset = this.ly * 160 * 4;
+      if (layers) {
+        if (!capture.lines[this.ly]) { capture.lines[this.ly] = 1; capture.lineCount++; }
+        layers.sprites.fill(0, lineOffset, lineOffset + 640);
+        layers.window.fill(0, lineOffset, lineOffset + 640);
+      }
       const windowX = this.io[0x4b] - 7;
       const windowVisible = window && !!(lcd & 0x20) && (this.color || !!(lcd & 1))
         && (useLineState ? this.windowTriggered : this.ly >= this.io[0x4a]) && windowX < 160;
@@ -417,6 +468,17 @@
         bgColors[x] = color;
         bgPriority[x] = visible ? attributes & 128 : 0;
         if (visible) this.paint(x, color, attributes & 7);
+        if (layers) {
+          if (window) {
+            this.paint(x, color, attributes & 7, false, layers.window);
+            const bx = (x + this.io[0x43]) & 255, by = (this.ly + this.io[0x42]) & 255;
+            const bgIndex = (lcd & 8 ? 0x1c00 : 0x1800) + (by >> 3) * 32 + (bx >> 3);
+            const bgAttr = this.color ? this.vram[8192 + bgIndex] : 0;
+            const bgColor = this.color || (lcd & 1)
+              ? this.tilePixel(this.vram[bgIndex], bgAttr, bx & 7, by & 7, !!(lcd & 16)) : 0;
+            this.paint(x, bgColor, bgAttr & 7, false, layers.background);
+          } else this.paint(x, color, attributes & 7, false, layers.background);
+        }
       }
       if (windowVisible) this.windowLine++;
       if (!showSprites || !(lcd & 2) || (useLineState && (this.oamScanBlocked || this.dmaActive))) return;
@@ -438,6 +500,11 @@
           covered[x] = 1;
           if (bgColors[x] && (!this.color || (lcd & 1)) && ((attr & 128) || bgPriority[x])) continue;
           this.paint(x, color, this.color ? attr & 7 : (attr >> 4) & 1, true);
+          if (layers) {
+            const overWindow = windowVisible && x >= windowX;
+            this.paint(x, color, this.color ? attr & 7 : (attr >> 4) & 1, true,
+              overWindow ? layers.window : layers.sprites);
+          }
         }
       }
     }

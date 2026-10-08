@@ -17,6 +17,10 @@
     <script src="saves.js" defer></script>
     <script src="states.js" defer></script>
     <script src="graphics.js" defer></script>
+    <script src="preset/aladdin.js" defer></script>
+    <script src="preset/pokemon-crystal.js" defer></script>
+    <script src="world.js" defer></script>
+    <script src="scene.js" defer></script>
     <script src="app.js" defer></script>
     <script src="pwa.js" defer></script>
   </head>
@@ -76,6 +80,7 @@
           </div>
           <div class="screen" id="screen">
             <canvas id="game-canvas" width="160" height="144" tabindex="0" aria-label="Écran de jeu Game Boy Color"></canvas>
+            <canvas id="scene-canvas" width="640" height="576" aria-label="Scène expérimentale 2.5D ou 3D" aria-hidden="true" hidden></canvas>
             <div class="screen-placeholder" id="screen-placeholder">
               <span class="pixel-mark" aria-hidden="true">P</span>
               <p>VOTRE PROCHAINE AVENTURE<br>VOUS ATTEND</p>
@@ -97,6 +102,7 @@
           <button id="reset-button" type="button" disabled>Redémarrer</button>
           <button id="sound-button" type="button" aria-pressed="false">Activer le son</button>
           <button id="fullscreen-button" type="button" aria-pressed="false" aria-keyshortcuts="F">Plein écran</button>
+          <label class="speed-control" for="render-mode">Rendu <select id="render-mode"><option value="2d">2D original</option><option value="2.5d" id="scene-option" disabled>2.5D · preset requis</option><option value="3d" id="world-option" disabled>3D · Cristal</option></select></label>
           <label class="speed-control" for="playback-speed">Vitesse <select id="playback-speed"><option value="1">×1</option><option value="2">×2</option><option value="4">×4</option></select></label>
           <button id="capture-screen" type="button">Capture PNG</button>
           <button id="quick-save" class="immersive-only" type="button" disabled>État · F6</button>
@@ -105,6 +111,21 @@
         </div>
         <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
         <p id="comfort-status" class="status-message" role="status" aria-live="polite">Vitesse normale. Le son est coupé pendant l’avance rapide.</p>
+        <p id="scene-status" class="status-message" role="status" aria-live="polite">Prototype 2.5D : chargez Pokémon Cristal UE 1.1 ou Aladdin GBC pour activer un preset.</p>
+        <details class="settings">
+          <summary>Caméra et relief 2.5D / 3D</summary>
+          <p>Prototype visuel : Aladdin sépare ses couches ; Cristal UE 1.1 ajoute un relief selon les collisions de la carte et redresse les personnages. Menus non reconnus sans relief, fenêtre en surimpression. Le jeu et ses collisions restent en 2D.</p>
+          <p>Mode 3D : Bourg Geon conserve ses arbres et maisons modélisés. Les autres cartes reconnues de Cristal utilisent un sol horizontal texturé, des volumes selon les collisions et des personnages debout : villes, routes, intérieurs, grottes, passages et donjons. Start et les dialogues standard restent en surimpression au-dessus du décor 3D. Décors génériques approximatifs ; combats et sous-menus plein écran en 2D.</p>
+          <div class="settings-row">
+            <label for="scene-yaw">Rotation <input id="scene-yaw" type="range" min="-45" max="45" value="-18"> <output id="scene-yaw-value">-18°</output></label>
+            <label for="scene-pitch">Inclinaison <input id="scene-pitch" type="range" min="-35" max="35" value="10"> <output id="scene-pitch-value">10°</output></label>
+            <label for="scene-zoom">Zoom <input id="scene-zoom" type="range" min="50" max="130" value="90"> <output id="scene-zoom-value">90 %</output></label>
+            <label for="scene-thickness">Relief <input id="scene-thickness" type="range" min="0" max="16" value="4"> <output id="scene-thickness-value">4</output></label>
+            <label for="scene-light">Ombrage <input id="scene-light" type="range" min="0" max="100" value="75"> <output id="scene-light-value">75 %</output></label>
+            <button id="scene-reset" type="button">Caméra du preset</button>
+          </div>
+          <p>Ces réglages sont temporaires et n’entrent pas dans les sauvegardes. Capture PNG conserve l’image 2D originale.</p>
+        </details>
         <div class="settings">
           <button id="install-app" type="button" hidden>Installer v3ry Pocket Color</button>
           <p id="pwa-status" class="status-message" role="status" aria-live="polite">L’installation hors ligne nécessite HTTPS ou localhost.</p>
