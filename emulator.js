@@ -32,6 +32,13 @@
       this.doubleSpeed = false;
       this.speedPhase = 0;
       this.stall = 0;
+      this.dmaActive = false;
+      this.dmaSource = 0;
+      this.dmaIndex = 0;
+      this.dmaClock = 0;
+      this.mode3End = 252;
+      this.windowTriggered = true;
+      this.oamScanBlocked = false;
       this.buttons = 0;
       this.serialCycles = 0;
       this.serialOutput = "";
@@ -49,6 +56,8 @@
       this.updateSTAT();
     }
     interrupt(bit) { this.io[0x0f] |= 1 << bit; }
+    pendingInterrupts() { return this.ie & this.io[0x0f] & 31; }
+    acknowledgeInterrupt(bit) { this.io[0x0f] &= ~(1 << bit); }
     joypad() {
       let value = 15;
       if (!(this.io[0] & 0x10)) value &= ~(this.buttons & 15);
@@ -64,8 +73,22 @@
     }
     releaseButtons() { this.buttons = 0; }
     wramBank() { return this.color ? (this.io[0x70] & 7) || 1 : 1; }
+    dmaBus(address) {
+      if (address < 0x8000 || (address >= 0xa000 && address < 0xc000)) return 1;
+      if (address >= 0xc000 && address < 0xfe00) return 2;
+      if (address >= 0x8000 && address < 0xa000) return 3;
+      return 0;
+    }
+    dmaBlocked(address) {
+      if (!this.dmaActive) return false;
+      if (address >= 0xfe00 && address < 0xfea0) return true;
+      if (!this.color) return address < 0xff80 || address === 0xffff;
+      const bus = this.dmaBus(address);
+      return bus !== 0 && bus === this.dmaBus(this.dmaSource);
+    }
     read(address, cpuAccess = true) {
       address &= 0xffff;
+      if (cpuAccess && this.dmaBlocked(address)) return 255;
       if (address < 0x8000) return this.cartridge.readROM(address);
       if (address < 0xa000) {
         if (cpuAccess && this.mode() === 3) return 255;
@@ -110,6 +133,7 @@
     }
     write(address, value) {
       address &= 0xffff; value &= 255;
+      if (address !== 0xff46 && this.dmaBlocked(address)) return;
       if (address < 0x8000) this.cartridge.control(address, value);
       else if (address < 0xa000) {
         if (this.mode() !== 3) this.vram[(address & 0x1fff) + (this.color ? (this.io[0x4f] & 1) * 8192 : 0)] = value;
@@ -144,7 +168,7 @@
       }
       if (index === 4 || index === 7) {
         const before = this.timerSignal();
-        if (index === 4) this.div = 0;
+        if (index === 4) this.resetDivider();
         else this.io[7] = value & 7;
         if (before && !this.timerSignal() && (index === 4 || !this.color || (value & 4))) this.incrementTimer();
         return;
@@ -155,9 +179,13 @@
       if (index === 0x44) return;
       if (index === 0x40) {
         const enabled = !!(this.io[index] & 128);
+        if (this.color && (this.io[index] & 32) && !(value & 32)) this.windowTriggered = false;
         this.io[index] = value;
         if (enabled !== !!(value & 128)) {
           this.dot = this.ly = this.windowLine = 0;
+          this.windowTriggered = !!(value & 128) && this.io[0x4a] === 0;
+          this.mode3End = 252;
+          this.oamScanBlocked = false;
           this.statLine = false;
           if (!(value & 128)) this.pixels.fill(255);
           this.updateSTAT();
@@ -167,8 +195,9 @@
       if (index === 0x45) { this.io[index] = value; this.updateSTAT(); return; }
       if (index === 0x46) {
         this.io[index] = value;
-        for (let i = 0; i < 160; i++) this.oam[i] = this.read((value << 8) + i, false);
-        this.stall += 640;
+        this.dmaSource = value << 8;
+        this.dmaIndex = this.dmaClock = 0;
+        this.dmaActive = true;
         return;
       }
       if ([0x4d, 0x4f, 0x70, 0x68, 0x69, 0x6a, 0x6b, 0x6c].includes(index) && !this.color) return;
@@ -219,10 +248,49 @@
     }
     switchSpeed() {
       if (!this.color || !(this.io[0x4d] & 1)) return false;
+      this.resetDivider();
       this.doubleSpeed = !this.doubleSpeed;
       this.io[0x4d] = 0;
-      this.div = 0;
       return true;
+    }
+    apuSignal() { return !!(this.div & (this.doubleSpeed ? 8192 : 4096)); }
+    resetDivider() {
+      if (this.apuSignal()) this.apu.clockDivider();
+      this.div = 0;
+      this.apu.frameClock = 0;
+    }
+    windowVisible() {
+      return this.windowTriggered && !!(this.io[0x40] & 32)
+        && (this.color || !!(this.io[0x40] & 1)) && this.io[0x4b] < 167;
+    }
+    lineSprites() {
+      const sprites = [], height = this.io[0x40] & 4 ? 16 : 8;
+      for (let i = 0; i < 40 && sprites.length < 10; i++) {
+        const y = this.oam[i * 4] - 16;
+        if (this.ly >= y && this.ly < y + height) sprites.push(i);
+      }
+      return sprites;
+    }
+    renderingEnd() {
+      const scroll = this.io[0x43] & 7, window = this.windowVisible(), wx = this.io[0x4b] - 7;
+      let end = 252 + scroll + (window ? 6 : 0);
+      if (!(this.io[0x40] & 2) || this.oamScanBlocked) return end;
+      const tiles = new Set();
+      const sprites = this.lineSprites().sort((a, b) => this.oam[a * 4 + 1] - this.oam[b * 4 + 1] || a - b);
+      for (const i of sprites) {
+        const rawX = this.oam[i * 4 + 1], x = rawX - 8;
+        if (rawX >= 168) continue;
+        if (rawX === 0) { end += 11; continue; }
+        const inWindow = window && x >= wx;
+        const position = inWindow ? x - wx : x + this.io[0x43];
+        const tile = `${Number(inWindow)}:${Math.floor(position / 8)}`;
+        if (!tiles.has(tile)) {
+          end += Math.max(0, 5 - (position & 7));
+          tiles.add(tile);
+        }
+        end += 6;
+      }
+      return Math.min(end, 369);
     }
     lcdLine() {
       // LY resets early on the last VBlank line; the PPU remains in mode 1.
@@ -231,7 +299,7 @@
     mode() {
       if (!(this.io[0x40] & 128)) return 0;
       if (this.ly >= 144) return 1;
-      return this.dot < 80 ? 2 : this.dot < 252 ? 3 : 0;
+      return this.dot < 80 ? 2 : this.dot < this.mode3End ? 3 : 0;
     }
     updateSTAT() {
       const stat = this.io[0x41], mode = this.mode();
@@ -244,12 +312,22 @@
     tick(cycles) {
       let baseCycles = 0;
       for (let i = 0; i < cycles; i++) {
+        if (this.dmaActive) {
+          if (this.mode() === 2) this.oamScanBlocked = true;
+          if (++this.dmaClock === 4) {
+            this.dmaClock = 0;
+            this.oam[this.dmaIndex] = this.read(this.dmaSource + this.dmaIndex, false);
+            if (++this.dmaIndex === 160) this.dmaActive = false;
+          }
+        }
         if (this.timerDelay && --this.timerDelay === 0) {
           this.io[5] = this.io[6]; this.interrupt(2);
         }
         const timerBefore = this.timerSignal();
+        const apuBefore = this.apuSignal();
         this.div = (this.div + 1) & 0xffff;
         if (timerBefore && !this.timerSignal()) this.incrementTimer();
+        if (apuBefore && !this.apuSignal()) this.apu.clockDivider();
         if ((this.io[2] & 0x81) === 0x81) {
           const period = this.color && (this.io[2] & 2) ? 128 : 4096;
           if (++this.serialCycles >= period) {
@@ -259,25 +337,32 @@
         }
         if (this.doubleSpeed && (this.speedPhase ^= 1)) continue;
         baseCycles++;
+        this.apu.tick(1, true);
+        this.apu.frameClock = (this.div & (this.doubleSpeed ? 16383 : 8191)) >> (this.doubleSpeed ? 1 : 0);
         if (this.io[0x40] & 128) {
           this.dot++;
           if (this.ly === 153 && this.dot === 4) this.updateSTAT();
-          if (this.dot === 80) this.updateSTAT();
-          if (this.dot === 252 && this.ly < 144) {
-            this.renderLine();
+          if (this.dot === 80 && this.ly < 144) {
+            this.mode3End = this.renderingEnd();
+            this.updateSTAT();
+          }
+          if (this.dot === this.mode3End && this.ly < 144) {
+            this.renderLine({ useLineState: true });
             if (this.hdmaActive) this.transferBlock();
             this.updateSTAT();
           }
           if (this.dot === 456) {
             this.dot = 0;
             this.ly++;
-            if (this.ly === 144) { this.interrupt(0); this.frames++; }
+            this.mode3End = 252;
+            this.oamScanBlocked = false;
+            if (this.ly === 144) { this.interrupt(0); this.frames++; this.windowTriggered = false; }
             if (this.ly === 154) { this.ly = 0; this.windowLine = 0; }
+            if (this.ly < 144 && this.ly === this.io[0x4a]) this.windowTriggered = true;
             this.updateSTAT();
           }
         }
       }
-      this.apu.tick(baseCycles);
       return baseCycles;
     }
     step() {
@@ -314,11 +399,11 @@
       }
       this.pixels[offset + 3] = 255;
     }
-    renderLine({ background = true, window = true, sprites: showSprites = true } = {}) {
+    renderLine({ background = true, window = true, sprites: showSprites = true, useLineState = false } = {}) {
       const lcd = this.io[0x40], bgColors = new Uint8Array(160), bgPriority = new Uint8Array(160);
       const windowX = this.io[0x4b] - 7;
       const windowVisible = window && !!(lcd & 0x20) && (this.color || !!(lcd & 1))
-        && this.ly >= this.io[0x4a] && windowX < 160;
+        && (useLineState ? this.windowTriggered : this.ly >= this.io[0x4a]) && windowX < 160;
       for (let x = 0; x < 160; x++) {
         const window = windowVisible && x >= windowX;
         const px = window ? x - windowX : (x + this.io[0x43]) & 255;
@@ -334,12 +419,8 @@
         if (visible) this.paint(x, color, attributes & 7);
       }
       if (windowVisible) this.windowLine++;
-      if (!showSprites || !(lcd & 2)) return;
-      const sprites = [], height = lcd & 4 ? 16 : 8;
-      for (let i = 0; i < 40 && sprites.length < 10; i++) {
-        const y = this.oam[i * 4] - 16;
-        if (this.ly >= y && this.ly < y + height) sprites.push(i);
-      }
+      if (!showSprites || !(lcd & 2) || (useLineState && (this.oamScanBlocked || this.dmaActive))) return;
+      const sprites = this.lineSprites(), height = lcd & 4 ? 16 : 8;
       if (!this.color || (this.io[0x6c] & 1)) {
         sprites.sort((a, b) => this.oam[a * 4 + 1] - this.oam[b * 4 + 1] || a - b);
       }

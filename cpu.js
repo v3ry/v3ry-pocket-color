@@ -22,6 +22,9 @@
 
     read(address) { return this.bus.read(address & 0xffff); }
     write(address, value) { this.bus.write(address & 0xffff, value & 255); }
+    pendingInterrupts() {
+      return this.bus.pendingInterrupts ? this.bus.pendingInterrupts() : this.read(0xffff) & this.read(0xff0f) & 31;
+    }
     fetch() {
       const value = this.read(this.pc);
       this.pc = (this.pc + 1) & 0xffff;
@@ -144,7 +147,7 @@
       this.f = (this.f & N) | (this.a === 0 ? Z : 0) | (carry ? C : 0);
     }
     step() {
-      const pending = this.read(0xffff) & this.read(0xff0f) & 31;
+      const pending = this.pendingInterrupts();
       if (pending) {
         this.halted = false;
         this.stopped = false;
@@ -153,7 +156,8 @@
           while (!(pending & (1 << bit))) bit++;
           this.ime = false;
           this.imeDelay = 0;
-          this.write(0xff0f, this.read(0xff0f) & ~(1 << bit));
+          if (this.bus.acknowledgeInterrupt) this.bus.acknowledgeInterrupt(bit);
+          else this.write(0xff0f, this.read(0xff0f) & ~(1 << bit));
           this.push(this.pc);
           this.pc = 0x40 + bit * 8;
           return 20;
@@ -214,7 +218,7 @@
         }
       } else if (x === 1) {
         if (opcode === 0x76) {
-          if (!this.ime && (this.read(0xffff) & this.read(0xff0f) & 31)) this.haltBug = true;
+          if (!this.ime && this.pendingInterrupts()) this.haltBug = true;
           else this.halted = true;
           return 4;
         }

@@ -39,7 +39,7 @@
     if (!/^[0-9a-f]{64}$/.test(romKey)) throw new Error("Identite ROM invalide.");
     if (game.cartridge.hasRTC) game.cartridge.updateRTC();
     return {
-      format: FORMAT, version: 1, romKey, createdAt: Date.now(), color: game.color,
+      format: FORMAT, version: 2, romKey, createdAt: Date.now(), color: game.color,
       cpu: scalarCopy(game.cpu, new Set(["bus"])),
       machine: scalarCopy(game, MACHINE_EXCLUDE),
       memory: Object.fromEntries(MEMORY.map(key => [key, Array.from(game[key])])),
@@ -57,7 +57,7 @@
     };
   }
   function restore(game, data, romKey) {
-    if (!data || data.format !== FORMAT || data.version !== 1) throw new Error("Format ou version de sauvegarde d'etat incompatible.");
+    if (!data || data.format !== FORMAT || ![1, 2].includes(data.version)) throw new Error("Format ou version de sauvegarde d'etat incompatible.");
     if (data.romKey !== romKey || data.color !== game.color || data.cartridge?.type !== game.cartridge.type) {
       throw new Error("Cet etat appartient a une autre ROM. Chargez exactement le meme jeu.");
     }
@@ -66,13 +66,25 @@
     for (const key of ["a", "f", "b", "c", "d", "e", "h", "l"]) integer(cpu[key], 0, 255);
     if (cpu.f & 15) throw new Error("Flags CPU invalides.");
     integer(cpu.pc, 0, 65535); integer(cpu.sp, 0, 65535); integer(cpu.imeDelay, 0, 2);
-    const machine = validateScalars(data.machine, game, MACHINE_EXCLUDE);
+    let machineData = data.machine;
+    if (data.version === 1) {
+      const legacyExclude = new Set([...MACHINE_EXCLUDE, "dmaActive", "dmaSource", "dmaIndex",
+        "dmaClock", "mode3End", "windowTriggered", "oamScanBlocked"]);
+      validateScalars(machineData, game, legacyExclude);
+      machineData = { ...machineData, dmaActive: false, dmaSource: 0, dmaIndex: 0, dmaClock: 0,
+        mode3End: 252, windowTriggered: machineData.ly < 144 && machineData.ly >= data.memory?.io?.[0x4a],
+        oamScanBlocked: false };
+    }
+    const machine = validateScalars(machineData, game, MACHINE_EXCLUDE);
     const ranges = {
       ie: 255, div: 65535, timerDelay: 4, dot: 455, ly: 153, windowLine: 144,
       frames: Number.MAX_SAFE_INTEGER, speedPhase: 1, stall: 1000000, buttons: 255,
       serialCycles: 4096, hdmaBlocks: 128, hdmaSource: 65535, hdmaDestination: 8191,
+      dmaSource: 65535, dmaIndex: 160, dmaClock: 3, mode3End: 369,
     };
     for (const [key, max] of Object.entries(ranges)) integer(machine[key], 0, max);
+    if (machine.mode3End < 252 || (machine.dmaSource & 255)
+      || (machine.dmaActive && machine.dmaIndex >= 160)) throw new Error("Etat video/DMA invalide.");
     for (const key of MEMORY) byteArray(data.memory?.[key], game[key].length);
     const cart = validateScalars(data.cartridge.scalars, game.cartridge, CART_EXCLUDE);
     for (const [key, max] of Object.entries({ bank: 511, highBank: 3, ramBank: 255, mode: 1, latch: 255 })) {

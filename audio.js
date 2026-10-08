@@ -116,6 +116,9 @@
       }
       this.frameStep = (this.frameStep + 1) & 7;
     }
+    clockDivider() {
+      if (this.registers[0x16] & 128) this.sequencer();
+    }
     sampleChannel(index) {
       const channel = this.channels[index];
       if (!channel.enabled) return 0;
@@ -144,18 +147,22 @@
       }
       return (channel.lfsr & 1 ? -1 : 1) * channel.volume / 15;
     }
-    tick(cycles) {
+    tick(cycles, dividerClocked = false) {
       this.frameClock += cycles;
-      while (this.frameClock >= 8192) { this.frameClock -= 8192; this.sequencer(); }
+      while (this.frameClock >= 8192) {
+        this.frameClock -= 8192;
+        if (!dividerClocked) this.clockDivider();
+      }
       this.sampleClock += cycles * this.sampleRate;
       while (this.sampleClock >= CLOCK) {
         this.sampleClock -= CLOCK;
         const channels = this.channels.map((_, i) => this.sampleChannel(i));
         const route = this.registers[21], volume = this.registers[20];
         for (let side = 0; side < 2; side++) {
+          const shift = (1 - side) * 4;
           let sum = 0;
-          for (let i = 0; i < 4; i++) if (route & (1 << (i + side * 4))) sum += channels[i];
-          const output = sum * (((volume >> (side * 4)) & 7) + 1) / 64;
+          for (let i = 0; i < 4; i++) if (route & (1 << (i + shift))) sum += channels[i];
+          const output = sum * (((volume >> shift) & 7) + 1) / 64;
           const filtered = output - this.highpass[side];
           this.highpass[side] = output - filtered * 0.999;
           this.samples.push(filtered);

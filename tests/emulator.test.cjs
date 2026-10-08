@@ -183,7 +183,11 @@ test("background attributes, window and sprite priority/transparency", () => {
 test("OAM DMA, CGB GDMA and cancellable HDMA", () => {
   const gb = new GameBoy(makeROM({ color: true }));
   for (let i = 0; i < 160; i++) gb.write(0xc000 + i, i);
-  gb.write(0xff46, 0xc0); assert.equal(gb.oam[159], 159); assert.equal(gb.stall, 640);
+  gb.write(0xff46, 0xc0);
+  assert.equal(gb.oam[159], 0); assert.equal(gb.stall, 0);
+  gb.tick(639); assert.equal(gb.oam[159], 0); assert.equal(gb.dmaActive, true);
+  gb.tick(1); assert.equal(gb.oam[159], 159); assert.equal(gb.dmaActive, false);
+  gb.write(0xff40, 0); gb.write(0xff40, 0x91);
   gb.write(0xff51, 0xc0); gb.write(0xff52, 0); gb.write(0xff53, 0); gb.write(0xff54, 0);
   gb.write(0xff55, 1); assert.equal(gb.vram[31], 31); assert.equal(gb.read(0xff55), 255);
   gb.write(0xff55, 0x81); assert.equal(gb.hdmaActive, true);
@@ -256,8 +260,6 @@ test("CPU video access follows LCD modes and DMA bypasses CPU-only restrictions"
     assert.equal(gb.read(0x8000), 255);
     gb.write(0x8000, 0x78);
     assert.equal(gb.vram[0], 0x12);
-    gb.write(0xff46, 0x80);
-    assert.equal(gb.oam[0], 0x12);
     gb.tick(172);
     assert.equal(gb.mode(), 0);
     gb.write(0x8000, 0x9a); gb.write(0xfe00, 0xbc);
@@ -271,7 +273,181 @@ test("CPU video access follows LCD modes and DMA bypasses CPU-only restrictions"
     gb.write(0xfe00, 0xef); gb.write(0x8000, 0xab);
     assert.equal(gb.read(0xfe00), 0xef);
     assert.equal(gb.read(0x8000), 0xab);
+    const dma = new GameBoy(makeROM({ color }));
+    dma.vram[0] = 0x12;
+    dma.tick(80);
+    dma.write(0xff46, 0x80);
+    dma.tick(4);
+    assert.equal(dma.oam[0], 0x12);
+    assert.equal(dma.read(0x8000), 255);
   }
+});
+
+test("OAM DMA copies one byte per four CPU clocks, observes source changes and can restart", () => {
+  for (const fast of [false, true]) {
+    const gb = new GameBoy(makeROM({ color: true }));
+    gb.write(0xff40, 0);
+    if (fast) { gb.write(0xff4d, 1); gb.switchSpeed(); }
+    gb.wram.fill(0x12, 0, 160);
+    gb.wram.fill(0x34, 0x100, 0x1a0);
+    gb.write(0xff46, 0xc0);
+    assert.equal(gb.oam[0], 0);
+    gb.tick(3); assert.equal(gb.oam[0], 0);
+    gb.tick(1); assert.equal(gb.oam[0], 0x12);
+    gb.wram[1] = 0x56;
+    gb.tick(4); assert.equal(gb.oam[1], 0x56);
+    gb.write(0xff46, 0xc1);
+    assert.equal(gb.dmaIndex, 0);
+    const elapsed = gb.tick(639);
+    assert.equal(elapsed, fast ? 319 : 639);
+    assert.equal(gb.dmaActive, true);
+    assert.equal(gb.oam[158], 0x34);
+    assert.equal(gb.oam[159], 0);
+    gb.tick(1);
+    assert.equal(gb.oam[159], 0x34);
+    assert.equal(gb.dmaActive, false);
+  }
+});
+
+test("DMG DMA permits HRAM execution but blocks external reads, writes and mapper controls", () => {
+  const gb = new GameBoy(makeROM({ type: 1 }));
+  gb.write(0xff40, 0);
+  gb.hram.set([0x3e, 0x42, 0xea, 0x00, 0xc0, 0x76]);
+  gb.cpu.pc = 0xff80;
+  gb.write(0xff46, 0xc0);
+  assert.equal(gb.read(0xc000), 255);
+  assert.equal(gb.read(0), 255);
+  gb.write(0x2000, 2);
+  assert.equal(gb.cartridge.bank, 1);
+  gb.write(0xc000, 0x99);
+  gb.step(); gb.step(); gb.step();
+  assert.equal(gb.cpu.a, 0x42);
+  assert.equal(gb.cpu.halted, true);
+  assert.equal(gb.cpu.haltBug, false);
+  assert.equal(gb.wram[0], 0);
+  assert.ok(gb.dmaIndex > 0);
+  gb.tick(640);
+  assert.equal(gb.read(0xc000), 0);
+  gb.write(0xc000, 0x99);
+  assert.equal(gb.read(0xc000), 0x99);
+});
+
+test("CGB DMA blocks only the source bus and OAM, leaving the other memory bus usable", () => {
+  const gb = new GameBoy(makeROM({ color: true }));
+  gb.write(0xff40, 0);
+  gb.write(0xff46, 0xc0);
+  assert.equal(gb.read(0xc000), 255);
+  assert.equal(gb.read(0xe000), 255);
+  assert.equal(gb.read(0), gb.cartridge.readROM(0));
+  gb.write(0xff80, 42); assert.equal(gb.read(0xff80), 42);
+  gb.write(0x8000, 17); assert.equal(gb.read(0x8000), 17);
+  assert.equal(gb.read(0xfe00), 255);
+  gb.write(0xff46, 0);
+  assert.equal(gb.read(0), 255);
+  gb.write(0xc000, 19); assert.equal(gb.read(0xc000), 19);
+  gb.tick(640);
+  assert.equal(gb.read(0xfe00), gb.cartridge.readROM(0));
+});
+
+test("mode 3 includes fine scroll, window and sprite fetch penalties but keeps 456-dot lines", () => {
+  const gb = new GameBoy(makeROM({ color: true }));
+  gb.io[0x43] = 7;
+  gb.tick(80);
+  assert.equal(gb.mode3End, 259);
+  gb.tick(178); assert.equal(gb.mode(), 3);
+  gb.tick(1); assert.equal(gb.mode(), 0);
+  gb.tick(197); assert.equal(gb.ly, 1); assert.equal(gb.dot, 0);
+  gb.io[0x43] = 0;
+  gb.io[0x40] = 0xb3; gb.io[0x4b] = 87;
+  gb.oam.set([17, 8, 0, 0, 17, 9, 0, 0]);
+  gb.tick(80);
+  assert.equal(gb.mode3End, 275); // window 6, first tile wait 5, two OBJ fetches 12
+  gb.tick(194); assert.equal(gb.mode(), 3);
+  gb.tick(1); assert.equal(gb.mode(), 0);
+  gb.tick(181); assert.equal(gb.ly, 2); assert.equal(gb.dot, 0);
+});
+
+test("sprite penalties use the first ten OAM entries and include off-left but not off-right sprites", () => {
+  const gb = new GameBoy(makeROM());
+  gb.io[0x40] |= 2;
+  for (let i = 0; i < 11; i++) gb.oam.set([16, i < 10 ? 168 : 8, 0, 0], i * 4);
+  gb.tick(80);
+  assert.equal(gb.mode3End, 252);
+  gb.oam[1] = 0;
+  assert.equal(gb.renderingEnd(), 263);
+});
+
+test("window Y match is latched per frame; changing WY to a past line cannot start it", () => {
+  for (const color of [false, true]) {
+    const gb = new GameBoy(makeROM({ color }));
+    gb.write(0xff40, 0);
+    gb.write(0xff4a, 10); gb.write(0xff4b, 7);
+    gb.write(0xff40, 0xb1);
+    gb.tick(456 * 5);
+    gb.write(0xff4a, 2);
+    gb.tick(456);
+    assert.equal(gb.windowTriggered, false);
+    assert.equal(gb.windowLine, 0);
+    gb.write(0xff4a, 7);
+    gb.tick(456 + 258);
+    assert.equal(gb.windowTriggered, true);
+    assert.equal(gb.windowLine, 1);
+    gb.write(0xff40, 0x91);
+    assert.equal(gb.windowTriggered, !color);
+    gb.tick(456);
+    gb.write(0xff40, 0xb1);
+    assert.equal(gb.windowVisible(), !color);
+  }
+});
+
+test("OAM DMA during mode 2 hides sprites on the affected line instead of showing partial OAM", () => {
+  const gb = new GameBoy(makeROM({ color: true }));
+  gb.io[0x40] |= 2;
+  gb.bgPalette.fill(0); gb.objPalette.fill(0);
+  gb.objPalette.set([0x1f, 0], 2);
+  gb.vram[16] = 255;
+  gb.oam.set([16, 8, 1, 0]);
+  gb.write(0xff46, 0xc0);
+  gb.tick(252);
+  assert.equal(gb.oamScanBlocked, true);
+  assert.deepEqual([...gb.pixels.slice(0, 4)], [0, 0, 0, 255]);
+});
+
+test("APU sequencer follows DIV falling edges and DIV writes at both CGB speeds", () => {
+  for (const fast of [false, true]) {
+    const gb = new GameBoy(makeROM({ color: true }));
+    gb.write(0xff40, 0); gb.write(0xff04, 0);
+    if (fast) { gb.write(0xff4d, 1); gb.switchSpeed(); }
+    gb.write(0xff11, 63); gb.write(0xff12, 0xf0); gb.write(0xff14, 0xc0);
+    const scale = fast ? 2 : 1;
+    gb.tick(8192 * scale - 1);
+    assert.equal(gb.apu.channels[0].enabled, true);
+    assert.equal(gb.apu.frameStep, 0);
+    gb.tick(1);
+    assert.equal(gb.apu.channels[0].enabled, false);
+    assert.equal(gb.apu.frameStep, 1);
+    gb.tick(4096 * scale);
+    gb.write(0xff04, 0);
+    assert.equal(gb.apu.frameStep, 2);
+    gb.write(0xff04, 0);
+    assert.equal(gb.apu.frameStep, 2);
+    gb.write(0xff26, 0);
+    gb.tick(8192 * scale * 3);
+    assert.equal(gb.apu.frameStep, 0);
+  }
+});
+
+test("APU envelope and length sequencing is independent of tick chunk size", () => {
+  const a = new GameBoy(makeROM()), b = new GameBoy(makeROM());
+  for (const gb of [a, b]) {
+    gb.write(0xff40, 0); gb.write(0xff04, 0);
+    gb.write(0xff11, 0x80); gb.write(0xff12, 0xa9); gb.write(0xff14, 0x80);
+  }
+  a.tick(8192 * 8);
+  for (let i = 0; i < 8192 * 8; i += 4) b.tick(4);
+  assert.equal(a.apu.channels[0].volume, 11);
+  assert.deepEqual(a.apu.channels, b.apu.channels);
+  assert.deepEqual(a.apu.drain(), b.apu.drain());
 });
 
 test("CGB palette data is blocked in mode 3 but auto-increment still occurs", () => {
@@ -323,4 +499,37 @@ test("APU generates finite stereo samples, triggers channels and disables DAC", 
   assert.equal(apu.drain().length, 0);
   apu.write(0xff12, 0); assert.equal(apu.read(0xff26) & 1, 0);
   apu.write(0xff26, 0); assert.equal(apu.read(0xff26), 0x70);
+});
+
+test("APU maps NR51 and NR50 left/right to Web Audio channels without swapping stereo", () => {
+  for (const [route, leftVolume, rightVolume] of [[0x10, 7, 0], [0x01, 0, 7], [0x11, 7, 1]]) {
+    const apu = new APU(48000);
+    apu.write(0xff11, 0x80); apu.write(0xff12, 0xf0); apu.write(0xff14, 0x80);
+    apu.write(0xff24, (leftVolume << 4) | rightVolume);
+    apu.write(0xff25, route);
+    apu.tick(88);
+    const [left, right] = apu.drain();
+    assert.equal(left, route & 0x10 ? (leftVolume + 1) / 64 : 0);
+    assert.equal(right, route & 1 ? (rightVolume + 1) / 64 : 0);
+  }
+});
+
+test("HDMA and STAT HBlank start at the variable end of rendering, not fixed dot 252", () => {
+  const gb = new GameBoy(makeROM({ color: true }));
+  gb.io[0x43] = 7;
+  gb.wram[0] = 0x42;
+  gb.write(0xff51, 0xc0); gb.write(0xff55, 0x80);
+  gb.write(0xff41, 8); gb.write(0xff0f, 0);
+  gb.tick(252);
+  assert.equal(gb.mode(), 3);
+  assert.equal(gb.vram[0], 0);
+  assert.equal(gb.hdmaActive, true);
+  assert.equal(gb.io[0x0f] & 2, 0);
+  gb.tick(6);
+  assert.equal(gb.vram[0], 0);
+  gb.tick(1);
+  assert.equal(gb.mode(), 0);
+  assert.equal(gb.vram[0], 0x42);
+  assert.equal(gb.hdmaActive, false);
+  assert.equal(gb.io[0x0f] & 2, 2);
 });

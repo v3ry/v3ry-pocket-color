@@ -67,13 +67,16 @@ test("wrong ROM, version and corrupt snapshots are rejected without mutation", a
   const before = States.capture(destination, key);
   for (const corrupt of [
     data => { data.romKey = "0".repeat(64); },
-    data => { data.version = 2; },
+    data => { data.version = 3; },
     data => { data.memory.vram.pop(); },
     data => { data.memory.pixels[0] = -1; },
     data => { data.cpu.pc = 65536; },
     data => { data.cpu.ime = "true"; },
     data => { data.cpu.f |= 1; },
     data => { data.machine.dot = 456; },
+    data => { data.machine.dmaSource = 1; },
+    data => { data.machine.dmaActive = true; data.machine.dmaIndex = 160; },
+    data => { data.machine.mode3End = 251; },
     data => { data.audio.channels[0].phase = Infinity; },
     data => { data.audio.channels[0].lfsr = -1; },
     data => { data.cartridge.scalars.bank = 1e8; },
@@ -104,4 +107,47 @@ test("states preserve the early LY reset while the PPU is still on VBlank line 1
   assert.equal(restored.ly, game.ly);
   assert.equal(restored.dot, game.dot);
   assert.equal(restored.mode(), 2);
+});
+
+test("version 2 states preserve an in-progress OAM DMA and variable mode 3 timing", () => {
+  const rom = makeROM({ color: true }), key = "0".repeat(64);
+  const game = new GameBoy(rom), restored = new GameBoy(rom);
+  game.io[0x43] = 5;
+  game.tick(80);
+  game.wram.fill(0x42, 0, 160);
+  game.write(0xff46, 0xc0);
+  game.tick(39);
+  const state = States.capture(game, key);
+  assert.equal(state.version, 2);
+  States.restore(restored, state, key);
+  assert.equal(restored.mode3End, 257);
+  assert.equal(restored.dmaIndex, 9);
+  assert.equal(restored.dmaClock, 3);
+  assert.equal(restored.dmaActive, true);
+  for (const gb of [game, restored]) gb.tick(601);
+  assert.deepEqual(game.oam, restored.oam);
+  assert.equal(restored.dmaActive, false);
+  assert.deepEqual(game.pixels, restored.pixels);
+  assert.equal(game.apu.frameStep, restored.apu.frameStep);
+});
+
+test("legacy version 1 states migrate without modifying the input or inventing an active DMA", () => {
+  const rom = makeROM({ color: true }), key = "0".repeat(64);
+  const original = new GameBoy(rom), restored = new GameBoy(rom);
+  original.tick(456 * 10);
+  const state = States.capture(original, key);
+  state.version = 1;
+  for (const field of ["dmaActive", "dmaSource", "dmaIndex", "dmaClock", "mode3End", "windowTriggered", "oamScanBlocked"]) {
+    delete state.machine[field];
+  }
+  const before = structuredClone(state);
+  States.restore(restored, state, key);
+  assert.deepEqual(state, before);
+  assert.equal(restored.dmaActive, false);
+  assert.equal(restored.mode3End, 252);
+  assert.equal(restored.ly, 10);
+  assert.equal(restored.windowTriggered, true);
+  const corrupt = structuredClone(state);
+  corrupt.machine.dmaActive = true;
+  assert.throws(() => States.restore(restored, corrupt, key), /Champs/);
 });
