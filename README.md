@@ -46,6 +46,14 @@ Si l'API Fullscreen est absente ou refusee, un message explique le passage a un 
 
 ## Coeur maison
 
+### Inspecteur graphique
+
+Ouvrez **Inspecteur graphique** dans le lecteur pour examiner les 384 tuiles de chaque banque VRAM, les deux cartes 32 x 32 (attributs CGB et adressage signe inclus), les 40 sprites OAM et les palettes BG/OBJ. Les positions, banques, palettes et flips des sprites ainsi que les registres LCD sont disponibles sous les apercus. Les pixels transparents sont affiches sur un damier.
+
+Les cases Fond, Fenetre et Sprites isolent les couches dans un **apercu separe**, sans modifier le jeu, ses entrees ni ses sauvegardes. Cet apercu reutilise le rendu du coeur avec la VRAM et les registres actuels ; il ne reproduit pas les changements de palettes/scroll intervenus pendant la derniere image. Il respecte les couches activees par LCDC. L'inspecteur est masque en plein ecran.
+
+L'actualisation en direct est limitee a 5 Hz et ne travaille pas lorsque le panneau est ferme. Decochez-la pour garder une vue fixe, ou utilisez Actualiser, y compris lorsque le jeu est en pause. Banque 1 et palettes 2-7 sont reservees au CGB ; le GB utilise BGP et les deux palettes OBJ.
+
 - `cpu.js` : instructions normales et CB du LR35902, flags, pile, interruptions, EI differe et HALT.
 - `cartridge.js` : ROM simple, MBC1, MBC2, MBC3 avec RTC et MBC5 ; banques ROM/RAM.
 - `emulator.js` : bus memoire, joypad, timers, serial interne, DMA, VRAM/WRAM CGB, palettes couleur, changement de vitesse, rendu fond/fenetre/sprites a 160 x 144.
@@ -53,6 +61,7 @@ Si l'API Fullscreen est absente ou refusee, un message explique le passage a un 
 - `zip.js` : lecture du repertoire ZIP, extraction native DEFLATE et CRC32.
 - `saves.js` : stockage IndexedDB par empreinte SHA-256 de la ROM, commits serialises et restauration RAM/RTC.
 - `states.js` : instantanes versionnes CPU, bus, video, DMA, audio, cartouche et RTC ; validation avant restauration.
+- `graphics.js` : inspection video en lecture seule et reconstruction des couches avec le rendu partage.
 - `app.js` : chargement local, choix dans les archives, canvas, boucle temps reel et commandes.
 
 ### Acces video et timer

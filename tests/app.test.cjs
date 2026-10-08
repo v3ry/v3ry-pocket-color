@@ -10,6 +10,7 @@ const ZIP = require("../zip.js");
 const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./helpers.cjs");
 const { SaveSession } = require("../saves.js");
 const States = require("../states.js");
+const Graphics = require("../graphics.js");
 
 class Element {
   constructor() {
@@ -48,6 +49,12 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   const context = { putImageData: image => { canvas.image = image; } };
   canvas.getContext = () => context;
   canvas.toDataURL = () => "data:image/png;base64,AAAA";
+  for (const name of ["preview", "tiles", "map0", "map1", "objects", "palettes"]) {
+    const target = element(`#graphics-${name}`);
+    target.getContext = () => ({ putImageData: image => { target.image = image; } });
+  }
+  for (const name of ["background", "window", "sprites", "live"]) element(`#graphics-${name}`).checked = true;
+  element("#graphics-bank").value = element("#graphics-palette").value = "0";
   const window = new Element(), document = new Element();
   document.querySelector = element;
   document.querySelectorAll = () => [];
@@ -78,6 +85,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketGameBoy: GameBoy, PocketZIP: ZIP,
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
+    PocketGraphics: Graphics,
     Uint8Array, AudioContext, ImageData: class { constructor(data) { this.data = data; } },
     Blob, URL: {
       createObjectURL: blob => { downloads.push(blob); return "blob:test"; },
@@ -130,6 +138,29 @@ test("first audio click enables sound; second click mutes it", async () => {
   await h.element("#sound-button").fire("click");
   assert.equal(h.evaluate("audioContext.state"), "suspended");
   assert.equal(h.element("#sound-button")["aria-pressed"], "false");
+});
+
+test("graphics inspector renders only when open and refreshes while paused without affecting the game", async () => {
+  const h = harness();
+  await load(h, "demo.gbc", makeDemoROM(true));
+  assert.equal(h.element("#graphics-tiles").image, undefined);
+  h.element("#graphics-inspector").open = true;
+  h.element("#graphics-inspector").fire("toggle");
+  assert.ok(h.element("#graphics-tiles").image);
+  assert.match(h.element("#graphics-status").textContent, /CGB/);
+  await h.element("#pause-button").fire("click");
+  const before = States.capture(h.evaluate("emulator"), "0".repeat(64));
+  h.element("#graphics-background").checked = false;
+  h.element("#graphics-background").fire("change");
+  h.element("#graphics-refresh").fire("click");
+  const after = States.capture(h.evaluate("emulator"), "0".repeat(64));
+  after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.pending.size, 0);
+  await load(h, "demo.gb", makeDemoROM(false));
+  assert.equal(h.element("#graphics-bank").disabled, true);
+  assert.match(h.element("#graphics-status").textContent, /GB/);
 });
 
 test("fullscreen enters/exits natively and browser Escape updates the button", async () => {

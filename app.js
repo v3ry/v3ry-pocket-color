@@ -24,6 +24,11 @@ const preferencesStatus = document.querySelector("#preferences-status");
 const gamepadStatus = document.querySelector("#gamepad-status");
 const fpsToggle = document.querySelector("#show-fps");
 const fpsStatus = document.querySelector("#fps-status");
+const graphicsInspector = document.querySelector("#graphics-inspector");
+const graphicsStatus = document.querySelector("#graphics-status");
+let graphicsTime = -Infinity;
+let graphicsGame = null;
+let graphicsFailed = false;
 const archivePicker = document.querySelector("#archive-picker");
 const archiveSelect = document.querySelector("#archive-rom");
 const archiveOpen = document.querySelector("#archive-open");
@@ -375,8 +380,60 @@ function outputAudio() {
   source.onended = () => { audioSources.delete(source); source.disconnect(); };
 }
 
+function updateGraphics(force = false) {
+  if (!graphicsInspector.open || player.classList.contains("is-immersive")) return;
+  if (!emulator) {
+    graphicsStatus.textContent = "Chargez une ROM pour examiner sa mémoire vidéo.";
+    return;
+  }
+  const now = performance.now();
+  const changed = graphicsGame !== emulator;
+  if (!force && !changed && (graphicsFailed || !document.querySelector("#graphics-live").checked || now - graphicsTime < 200)) return;
+  graphicsGame = emulator;
+  graphicsTime = now;
+  try {
+    const bank = document.querySelector("#graphics-bank");
+    const palette = document.querySelector("#graphics-palette");
+    const object = document.querySelector("#graphics-object").checked;
+    bank.disabled = !emulator.color;
+    if (!emulator.color) bank.value = "0";
+    if (!emulator.color && Number(palette.value) > (object ? 1 : 0)) palette.value = "0";
+    const data = PocketGraphics.inspect(emulator, {
+      bank: Number(bank.value), palette: Number(palette.value), object,
+      background: document.querySelector("#graphics-background").checked,
+      window: document.querySelector("#graphics-window").checked,
+      sprites: document.querySelector("#graphics-sprites").checked,
+    });
+    const images = { preview: data.preview, tiles: data.tiles, map0: data.maps[0],
+      map1: data.maps[1], objects: data.objects, palettes: data.palettes };
+    for (const [name, image] of Object.entries(images)) {
+      document.querySelector(`#graphics-${name}`).getContext("2d")
+        .putImageData(new ImageData(image.pixels, image.width, image.height), 0, 0);
+    }
+    const r = data.registers;
+    document.querySelector("#graphics-registers").textContent =
+      `LCDC $${r.lcd.toString(16).padStart(2, "0")} · LY ${r.line} · mode ${r.mode}\nSCX ${r.scrollX} · SCY ${r.scrollY} · WX ${r.windowX} · WY ${r.windowY}`;
+    document.querySelector("#graphics-entries").textContent = data.entries.map(s =>
+      `${String(s.index).padStart(2, "0")} : x=${s.x} y=${s.y} tuile=$${s.tile.toString(16).padStart(2, "0")} ${s.height}px banque=${s.bank} palette=${s.palette} X=${Number(s.flipX)} Y=${Number(s.flipY)} derrière=${Number(s.behind)}`).join("\n");
+    graphicsFailed = false;
+    graphicsStatus.classList.remove("is-error");
+    graphicsStatus.textContent = `${emulator.color ? "CGB" : "GB"} · image ${r.frames} · mémoire vidéo lue sans modifier la partie.`;
+  } catch (error) {
+    graphicsFailed = true;
+    graphicsStatus.classList.add("is-error");
+    graphicsStatus.textContent = `Inspecteur indisponible : ${error.message}. Cliquez sur Actualiser pour réessayer.`;
+    console.error(error);
+  }
+}
+graphicsInspector.addEventListener("toggle", () => updateGraphics(true));
+for (const name of ["bank", "palette", "object", "background", "window", "sprites", "live"]) {
+  document.querySelector(`#graphics-${name}`).addEventListener("change", () => updateGraphics(true));
+}
+document.querySelector("#graphics-refresh").addEventListener("click", () => updateGraphics(true));
+
 function draw() {
   context.putImageData(new ImageData(emulator.pixels, 160, 144), 0, 0);
+  updateGraphics();
 }
 
 function run(time) {

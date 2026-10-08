@@ -314,10 +314,10 @@
       }
       this.pixels[offset + 3] = 255;
     }
-    renderLine() {
+    renderLine({ background = true, window = true, sprites: showSprites = true } = {}) {
       const lcd = this.io[0x40], bgColors = new Uint8Array(160), bgPriority = new Uint8Array(160);
       const windowX = this.io[0x4b] - 7;
-      const windowVisible = !!(lcd & 0x20) && (this.color || !!(lcd & 1))
+      const windowVisible = window && !!(lcd & 0x20) && (this.color || !!(lcd & 1))
         && this.ly >= this.io[0x4a] && windowX < 160;
       for (let x = 0; x < 160; x++) {
         const window = windowVisible && x >= windowX;
@@ -326,14 +326,15 @@
         const map = (window ? lcd & 0x40 : lcd & 8) ? 0x1c00 : 0x1800;
         const tileIndex = map + (py >> 3) * 32 + (px >> 3);
         const attributes = this.color ? this.vram[8192 + tileIndex] : 0;
-        const color = this.color || (lcd & 1)
+        const visible = window || background;
+        const color = visible && (this.color || (lcd & 1))
           ? this.tilePixel(this.vram[tileIndex], attributes, px & 7, py & 7, !!(lcd & 16)) : 0;
         bgColors[x] = color;
-        bgPriority[x] = attributes & 128;
-        this.paint(x, color, attributes & 7);
+        bgPriority[x] = visible ? attributes & 128 : 0;
+        if (visible) this.paint(x, color, attributes & 7);
       }
       if (windowVisible) this.windowLine++;
-      if (!(lcd & 2)) return;
+      if (!showSprites || !(lcd & 2)) return;
       const sprites = [], height = lcd & 4 ? 16 : 8;
       for (let i = 0; i < 40 && sprites.length < 10; i++) {
         const y = this.oam[i * 4] - 16;

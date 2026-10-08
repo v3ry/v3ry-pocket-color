@@ -14,6 +14,7 @@
     <script src="zip.js" defer></script>
     <script src="saves.js" defer></script>
     <script src="states.js" defer></script>
+    <script src="graphics.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -117,6 +118,38 @@
           <p id="preferences-status" class="status-message" role="status" hidden></p>
         </details>
         <p id="fps-status" class="status-message" role="status" hidden></p>
+        <details id="graphics-inspector" class="settings">
+          <summary>Inspecteur graphique · tuiles, sprites et couches</summary>
+          <p>Lecture seule : les filtres modifient cet aperçu, jamais le jeu. Reconstruction avec les registres actuels ; les effets raster de l’image réelle ne sont pas conservés.</p>
+          <div class="settings-row">
+            <label for="graphics-bank">Banque VRAM</label>
+            <select id="graphics-bank"><option value="0">0</option><option value="1">1 · CGB</option></select>
+            <label for="graphics-palette">Palette des tuiles</label>
+            <select id="graphics-palette">
+              <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option>
+            </select>
+            <label><input id="graphics-object" type="checkbox"> Palette OBJ</label>
+          </div>
+          <div class="settings-row">
+            <label><input id="graphics-background" type="checkbox" checked> Fond</label>
+            <label><input id="graphics-window" type="checkbox" checked> Fenêtre</label>
+            <label><input id="graphics-sprites" type="checkbox" checked> Sprites</label>
+            <label><input id="graphics-live" type="checkbox" checked> Actualisation en direct (5 Hz)</label>
+            <button id="graphics-refresh" type="button">Actualiser</button>
+          </div>
+          <p id="graphics-status" class="status-message" role="status">Chargez une ROM pour examiner sa mémoire vidéo.</p>
+          <div class="graphics-grid">
+            <figure><figcaption>Aperçu des couches · 160 × 144</figcaption><canvas id="graphics-preview" width="160" height="144" aria-label="Aperçu des couches"></canvas></figure>
+            <figure><figcaption>384 tuiles · $8000–$97FF</figcaption><canvas id="graphics-tiles" width="128" height="192" aria-label="Tuiles VRAM"></canvas></figure>
+            <figure><figcaption>Carte $9800 · attributs CGB inclus</figcaption><canvas id="graphics-map0" width="256" height="256" aria-label="Carte de tuiles 9800"></canvas></figure>
+            <figure><figcaption>Carte $9C00 · attributs CGB inclus</figcaption><canvas id="graphics-map1" width="256" height="256" aria-label="Carte de tuiles 9C00"></canvas></figure>
+            <figure><figcaption>40 sprites OAM · transparence conservée</figcaption><canvas id="graphics-objects" width="80" height="64" aria-label="Sprites OAM"></canvas></figure>
+            <figure><figcaption>Palettes : BG à gauche, OBJ à droite</figcaption><canvas id="graphics-palettes" width="64" height="64" aria-label="Palettes de couleur"></canvas></figure>
+          </div>
+          <pre id="graphics-registers"></pre>
+          <details><summary>Positions et attributs des 40 sprites</summary><pre id="graphics-entries"></pre></details>
+        </details>
         <h3 class="save-heading">Sauvegarde in-game · mémoire de cartouche</h3>
         <div class="player-actions" aria-label="Sauvegardes in-game">
           <button id="save-button" type="button" disabled>Enregistrer la RAM</button>
