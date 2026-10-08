@@ -24,6 +24,9 @@ const preferencesStatus = document.querySelector("#preferences-status");
 const gamepadStatus = document.querySelector("#gamepad-status");
 const fpsToggle = document.querySelector("#show-fps");
 const fpsStatus = document.querySelector("#fps-status");
+const speedInput = document.querySelector("#playback-speed");
+const comfortStatus = document.querySelector("#comfort-status");
+let playbackSpeed = 1;
 const graphicsInspector = document.querySelector("#graphics-inspector");
 const graphicsStatus = document.querySelector("#graphics-status");
 let graphicsTime = -Infinity;
@@ -361,7 +364,7 @@ function stopLoop() {
 
 function outputAudio() {
   const samples = emulator.apu.drain();
-  if (!audioContext || audioContext.state !== "running" || !samples.length) return;
+  if (playbackSpeed !== 1 || !audioContext || audioContext.state !== "running" || !samples.length) return;
   const length = samples.length / 2;
   const buffer = audioContext.createBuffer(2, length, emulator.apu.sampleRate);
   for (let side = 0; side < 2; side++) {
@@ -379,6 +382,45 @@ function outputAudio() {
   audioSources.add(source);
   source.onended = () => { audioSources.delete(source); source.disconnect(); };
 }
+
+function comfortMessage(message, error = false) {
+  comfortStatus.textContent = message;
+  comfortStatus.classList.toggle("is-error", error);
+  if (error) showFullscreenMessage(message, true);
+}
+speedInput.addEventListener("change", () => {
+  const speed = Number(speedInput.value);
+  if (![1, 2, 4].includes(speed)) {
+    speedInput.value = String(playbackSpeed);
+    comfortMessage("Vitesse invalide : choisissez ×1, ×2 ou ×4.", true);
+    return;
+  }
+  playbackSpeed = speed;
+  cycleDebt = 0;
+  previousTime = null;
+  fpsTime = null;
+  stopAudio();
+  comfortMessage(speed === 1 ? "Vitesse normale. Son rétabli s’il est activé."
+    : `Avance rapide ×${speed} : son temporairement coupé. La vitesse réelle dépend de votre appareil.`);
+});
+document.querySelector("#capture-screen").addEventListener("click", async () => {
+  if (!emulator || transitioning || importing) {
+    comfortMessage("Capture indisponible : chargez un jeu et attendez la fin du chargement.", true);
+    return;
+  }
+  try {
+    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc)$/i, "")
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
+    context.putImageData(new ImageData(emulator.pixels, 160, 144), 0, 0);
+    const blob = await new Promise((resolve, reject) => canvas.toBlob(result =>
+      result ? resolve(result) : reject(new Error("Le navigateur n’a pas produit de PNG.")), "image/png"));
+    downloadFile(blob, `${name}-${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
+    comfortMessage("Capture PNG 160 × 144 téléchargée, sans pause ni modification de la partie.");
+  } catch (error) {
+    comfortMessage(`Capture impossible : ${error.message}`, true);
+    console.error(error);
+  }
+});
 
 function updateGraphics(force = false) {
   if (!graphicsInspector.open || player.classList.contains("is-immersive")) return;
@@ -444,7 +486,7 @@ function run(time) {
       // Bound catch-up after a slow frame; do not fast-forward a hidden tab.
       const delta = time - previousTime;
       if (delta > 50) limitedFrames++;
-      cycleDebt += Math.min(delta, 50) * clock / 1000;
+      cycleDebt += Math.min(delta, 50) * clock * playbackSpeed / 1000;
       const started = performance.now();
       if (cycleDebt > 0) cycleDebt -= emulator.runCycles(cycleDebt);
       emulationTime += performance.now() - started;

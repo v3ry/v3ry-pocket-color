@@ -7,6 +7,8 @@
     <meta name="description" content="Lancez vos jeux Game Boy Color directement dans votre navigateur.">
     <title>v3ry Pocket Color — émulateur web</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
     <script src="cpu.js" defer></script>
     <script src="cartridge.js" defer></script>
     <script src="audio.js" defer></script>
@@ -16,6 +18,7 @@
     <script src="states.js" defer></script>
     <script src="graphics.js" defer></script>
     <script src="app.js" defer></script>
+    <script src="pwa.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -94,11 +97,18 @@
           <button id="reset-button" type="button" disabled>Redémarrer</button>
           <button id="sound-button" type="button" aria-pressed="false">Activer le son</button>
           <button id="fullscreen-button" type="button" aria-pressed="false" aria-keyshortcuts="F">Plein écran</button>
+          <label class="speed-control" for="playback-speed">Vitesse <select id="playback-speed"><option value="1">×1</option><option value="2">×2</option><option value="4">×4</option></select></label>
+          <button id="capture-screen" type="button">Capture PNG</button>
           <button id="quick-save" class="immersive-only" type="button" disabled>État · F6</button>
           <button id="quick-load" class="immersive-only" type="button" disabled>Charger · F8</button>
           <label class="volume-control" for="volume">Volume <input id="volume" type="range" min="0" max="100" value="70"><output id="volume-value" for="volume">70 %</output></label>
         </div>
         <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
+        <p id="comfort-status" class="status-message" role="status" aria-live="polite">Vitesse normale. Le son est coupé pendant l’avance rapide.</p>
+        <div class="settings">
+          <button id="install-app" type="button" hidden>Installer v3ry Pocket Color</button>
+          <p id="pwa-status" class="status-message" role="status" aria-live="polite">L’installation hors ligne nécessite HTTPS ou localhost.</p>
+        </div>
         <details class="settings">
           <summary>Commandes et performances</summary>
           <p id="gamepad-status" class="status-message" role="status">Manette : connectez une manette standard et appuyez sur un bouton.</p>

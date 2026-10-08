@@ -284,7 +284,7 @@ body.is-immersive {
   background: #101b14;
 }
 
-.player-column.is-immersive > :not(.screen-shell):not([aria-label="Actions du lecteur"]):not(.touch-controls):not(#fullscreen-status):not(#fps-status) {
+.player-column.is-immersive > :not(.screen-shell):not([aria-label="Actions du lecteur"]):not(.touch-controls):not(#fullscreen-status):not(#fps-status):not(#comfort-status) {
   display: none;
 }
 
@@ -529,6 +529,10 @@ body.is-immersive {
 }
 .volume-control input { width: 85px; }
 .volume-control output { min-width: 40px; }
+.speed-control { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.is-immersive .speed-control,
+.is-immersive #comfort-status { color: #b7c9b6; }
+.is-immersive #comfort-status { margin: 0; }
 .is-immersive .volume-control { color: #b7c9b6; }
 .is-immersive #fps-status { color: #b7c9b6; margin: 0; }
 

@@ -49,6 +49,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   const context = { putImageData: image => { canvas.image = image; } };
   canvas.getContext = () => context;
   canvas.toDataURL = () => "data:image/png;base64,AAAA";
+  canvas.toBlob = callback => callback(new Blob(["png"], { type: "image/png" }));
   for (const name of ["preview", "tiles", "map0", "map1", "objects", "palettes"]) {
     const target = element(`#graphics-${name}`);
     target.getContext = () => ({ putImageData: image => { target.image = image; } });
@@ -138,6 +139,83 @@ test("first audio click enables sound; second click mutes it", async () => {
   await h.element("#sound-button").fire("click");
   assert.equal(h.evaluate("audioContext.state"), "suspended");
   assert.equal(h.element("#sound-button")["aria-pressed"], "false");
+});
+
+test("fast-forward scales the base cycle budget by exactly 2 and 4 at both CGB CPU speeds", async () => {
+  for (const fastCPU of [false, true]) for (const speed of [1, 2, 4]) {
+    const h = harness();
+    await load(h, "demo.gbc", makeROM({ color: true, program: [0x18, 0xfe] }));
+    if (fastCPU) h.evaluate("emulator.write(0xff4d, 1); emulator.switchSpeed()");
+    h.element("#playback-speed").value = String(speed);
+    h.element("#playback-speed").fire("change");
+    h.scope.elapsedDots = 0;
+    h.evaluate("const tick = emulator.tick; emulator.tick = function(cycles) { const dots = tick.call(this, cycles); elapsedDots += dots; return dots; }");
+    h.evaluate("advance(0); advance(1000 / 60)");
+    const elapsedDots = h.scope.elapsedDots;
+    assert.ok(Math.abs(elapsedDots - 4194304 / 60 * speed) < 12);
+    assert.equal(h.evaluate("paused"), false);
+    assert.equal(h.pending.size, 1);
+    assert.equal(h.evaluate("emulator.apu.samples.length"), 0);
+  }
+});
+
+test("speed changes clear audio/debt without resuming pause; invalid speed reports an error", async () => {
+  const h = harness();
+  await load(h, "demo.gb", makeDemoROM());
+  await h.element("#pause-button").fire("click");
+  h.evaluate("cycleDebt = 123; nextAudioTime = 10");
+  h.element("#playback-speed").value = "4";
+  h.element("#playback-speed").fire("change");
+  assert.equal(h.evaluate("cycleDebt"), 0);
+  assert.equal(h.evaluate("nextAudioTime"), 0);
+  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.pending.size, 0);
+  h.element("#playback-speed").value = "9";
+  h.element("#playback-speed").fire("change");
+  assert.equal(h.evaluate("playbackSpeed"), 4);
+  assert.equal(h.element("#playback-speed").value, "4");
+  assert.match(h.element("#comfort-status").textContent, /invalide/);
+});
+
+test("fast-forward drains but never queues audio, then normal speed restores output", async () => {
+  const h = harness();
+  await load(h, "demo.gb", makeDemoROM());
+  await h.element("#sound-button").fire("click");
+  h.element("#playback-speed").value = "2";
+  h.element("#playback-speed").fire("change");
+  h.evaluate("emulator.apu.samples.push(0.1, 0.1); outputAudio()");
+  assert.equal(h.evaluate("emulator.apu.samples.length"), 0);
+  assert.equal(h.errors.length, 0);
+  h.scope.buffers = 0;
+  h.evaluate(`audioContext.createBuffer = () => { buffers++; return {getChannelData: () => new Float32Array(1), duration: 0.01}; };
+    audioContext.createBufferSource = () => ({connect(){}, start(){}, stop(){}})`);
+  h.element("#playback-speed").value = "1";
+  h.element("#playback-speed").fire("change");
+  h.evaluate("emulator.apu.samples.push(0.1, 0.1); outputAudio()");
+  assert.equal(h.scope.buffers, 1);
+});
+
+test("PNG captures work paused/running, preserve states and report missing game or encoding failure", async () => {
+  const h = harness();
+  await h.element("#capture-screen").fire("click");
+  assert.match(h.element("#comfort-status").textContent, /indisponible/);
+  await load(h, "demo.gbc", makeDemoROM(true));
+  for (const paused of [false, true]) {
+    if (paused) await h.element("#pause-button").fire("click");
+    const before = States.capture(h.evaluate("emulator"), "0".repeat(64));
+    const pending = h.pending.size;
+    await h.element("#capture-screen").fire("click");
+    const after = States.capture(h.evaluate("emulator"), "0".repeat(64));
+    after.createdAt = before.createdAt;
+    assert.deepEqual(after, before);
+    assert.equal(h.pending.size, pending);
+    assert.equal(h.downloads.at(-1).type, "image/png");
+    assert.match(h.created.at(-1).download, /^demo-.*\.png$/);
+  }
+  h.element("#game-canvas").toBlob = callback => callback(null);
+  await h.element("#capture-screen").fire("click");
+  assert.match(h.element("#comfort-status").textContent, /Capture impossible/);
+  assert.equal(h.errors.length, 1);
 });
 
 test("graphics inspector renders only when open and refreshes while paused without affecting the game", async () => {

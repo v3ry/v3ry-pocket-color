@@ -44,6 +44,22 @@ Le bouton **Plein ecran** ou la touche **F** agrandit le lecteur. **F**, **Echap
 
 Si l'API Fullscreen est absente ou refusee, un message explique le passage a un mode immersif dans la page ; les barres du navigateur peuvent alors rester visibles. F est ignore pendant la saisie, avec Ctrl/Alt/Meta et lors de la repetition automatique.
 
+### Avance rapide et captures
+
+Le selecteur **Vitesse** propose x1, x2 et x4, y compris en plein ecran. Il multiplie le budget d'emulation sans modifier la vitesse CPU materielle du jeu. La vitesse obtenue depend des performances de votre appareil. Le son est temporairement coupe en x2/x4 et ses buffers sont vides pour ne pas accumuler de retard ; revenir a x1 retrouve le son s'il etait active. Changer de vitesse ne reprend pas un jeu en pause. La vitesse reste un reglage de session, pas une preference persistante ni un champ des etats.
+
+**Capture PNG** telecharge l'image originale 160 x 144, sans interface, en jeu ou en pause. Le nom comprend celui de la ROM et un horodatage. La capture ne change ni la partie ni les sauvegardes.
+
+### Application installable et hors ligne
+
+Sous **HTTPS ou localhost**, le lecteur prepare automatiquement ses fichiers pour une utilisation hors ligne. Attendez le message **Application prete hors ligne** avant de couper la connexion. Installez-le avec le bouton propose par les navigateurs compatibles, ou depuis leur menu (sur iOS : Partager puis Sur l'ecran d'accueil). La disponibilite de l'installation depend du navigateur ; le lecteur reste utilisable sans installation.
+
+Le service worker ne met en cache que les fichiers de l'application : **aucune ROM, ZIP, sauvegarde ou requete externe**. Les ROM restent a selectionner sur votre appareil, les sauvegardes restent dans IndexedDB. Le navigateur peut purger ces donnees ; exportez les sauvegardes importantes. Une installation sur un autre domaine ou port ne partage pas le stockage de la page locale.
+
+Les mises a jour ne rechargent jamais une partie en cours. Lorsqu'une mise a jour est prete, sauvegardez puis fermez tous les onglets/fenetres de cette application et rouvrez-la. Pour publier une modification des fichiers caches, incrementez la version `CACHE` dans `sw.js` afin de conserver un ensemble coherent de fichiers.
+
+En ouverture `file://`, le lecteur fonctionne deja sans reseau mais ne peut pas installer de service worker. Pour tester la PWA localement, servez ce dossier sur localhost avec un serveur de fichiers statiques. Aucun compte, serveur de ROM ni dependance d'emulation n'est ajoute.
+
 ## Coeur maison
 
 ### Inspecteur graphique
@@ -62,6 +78,7 @@ L'actualisation en direct est limitee a 5 Hz et ne travaille pas lorsque le pann
 - `saves.js` : stockage IndexedDB par empreinte SHA-256 de la ROM, commits serialises et restauration RAM/RTC.
 - `states.js` : instantanes versionnes CPU, bus, video, DMA, audio, cartouche et RTC ; validation avant restauration.
 - `graphics.js` : inspection video en lecture seule et reconstruction des couches avec le rendu partage.
+- `pwa.js`, `sw.js`, `manifest.webmanifest` : installation, cache hors ligne limite aux fichiers de l'application et mises a jour sans interruption de partie.
 - `app.js` : chargement local, choix dans les archives, canvas, boucle temps reel et commandes.
 
 ### Acces video et timer
@@ -125,7 +142,7 @@ Les tests inclus utilisent des ROM synthetiques creees pour ce projet, pas des j
 Avec Node.js recent (22 ou plus) :
 
 ```sh
-node --test tests/app.test.cjs tests/cpu.test.cjs tests/emulator.test.cjs tests/graphics.test.cjs tests/zip.test.cjs tests/saves.test.cjs tests/states.test.cjs
+node --test tests/app.test.cjs tests/cpu.test.cjs tests/emulator.test.cjs tests/graphics.test.cjs tests/pwa.test.cjs tests/zip.test.cjs tests/saves.test.cjs tests/states.test.cjs
 ```
 
 Les tests couvrent le processeur (dont les immediats signes SP), les banques de cartouche, les quatre frequences timer, le DMA progressif et ses conflits de bus, les penalites video, la fenetre, DIV-APU, la cadence video/audio CGB en double vitesse, l'inspecteur en lecture seule, la migration et la restauration des etats, les commandes et les archives ZIP (stockees et compressees, multiples ROM, CRC et fichiers invalides). L'interface est aussi testee avec un DOM minimal : activation initiale du son, volume, preferences clavier, manettes, plein ecran, reprise automatique apres restauration, emplacements d'etat, historique RAM, FPS, erreurs d'emulation et chargements concurrents.
