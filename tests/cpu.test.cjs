@@ -156,3 +156,23 @@ test("conditional jumps, calls and returns have correct taken and untaken timing
     }
   }
 });
+
+test("every signed immediate gives correct SP wrap and half/carry flags", () => {
+  for (const opcode of [0xe8, 0xf8]) {
+    const { cpu, memory } = cpuWith([opcode, 0]);
+    for (const sp of [0, 1, 15, 16, 127, 128, 255, 256, 0x7fff, 0xfffe, 0xffff]) {
+      for (let byte = 0; byte < 256; byte++) {
+        cpu.pc = 0x100; cpu.sp = sp; cpu.f = 0xf0;
+        memory[0x101] = byte;
+        const cycles = cpu.step(), signed = byte < 128 ? byte : byte - 256;
+        const result = (sp + signed) & 65535;
+        const flags = ((sp & 15) + (byte & 15) > 15 ? 32 : 0)
+          | ((sp & 255) + byte > 255 ? 16 : 0);
+        assert.equal(cycles, opcode === 0xe8 ? 16 : 12);
+        assert.equal(opcode === 0xe8 ? cpu.sp : cpu.hl, result);
+        assert.equal(cpu.f, flags);
+        if (opcode === 0xf8) assert.equal(cpu.sp, sp);
+      }
+    }
+  }
+});

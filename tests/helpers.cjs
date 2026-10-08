@@ -83,9 +83,13 @@ function memorySaveStore() {
   store.records = new Map();
   store.read = async key => structuredClone(store.records.get(key));
   store.write = async (key, data) => { store.records.set(key, structuredClone(data)); };
-  store.writeGame = async (key, data, recovery) => {
+  store.writeGame = async (key, data, recovery, previous) => {
     await store.write(key, data);
     if (recovery !== undefined) store.records.set(`backup:${key}`, structuredClone(recovery));
+    if (previous !== undefined) {
+      const history = store.records.get(`history:${key}`) || [];
+      store.records.set(`history:${key}`, structuredClone([{ savedAt: Date.now(), data: previous }, ...history].slice(0, 3)));
+    }
   };
   return store;
 }

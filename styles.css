@@ -265,6 +265,81 @@ h1 span {
   min-width: 0;
 }
 
+body.is-immersive {
+  overflow: hidden;
+}
+
+.player-column.is-immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  background: #101b14;
+}
+
+.player-column.is-immersive > :not(.screen-shell):not([aria-label="Actions du lecteur"]):not(.touch-controls):not(#fullscreen-status):not(#fps-status) {
+  display: none;
+}
+
+.is-immersive .screen-shell {
+  flex: 1;
+  min-height: 90px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #101b14;
+  box-shadow: none;
+  display: flex;
+}
+
+.is-immersive .screen-topline,
+.is-immersive .screen-caption {
+  display: none;
+}
+
+.is-immersive .screen {
+  height: 100%;
+  aspect-ratio: auto;
+  border: 0;
+  box-shadow: none;
+}
+
+.is-immersive #game-canvas {
+  object-fit: contain;
+}
+
+.is-immersive .player-actions,
+.is-immersive .touch-controls {
+  flex-shrink: 0;
+  margin: 0;
+  justify-content: center;
+}
+
+.immersive-only { display: none; }
+.is-immersive .immersive-only { display: inline-block; }
+.is-immersive .player-actions { transition: opacity .2s ease; }
+.is-immersive.controls-idle .player-actions:not(:focus-within) {
+  opacity: 0;
+  pointer-events: none;
+}
+.is-immersive.controls-idle #fullscreen-status:not(.is-error) { opacity: 0; }
+
+.is-immersive #fullscreen-status {
+  margin: 0;
+  color: #b7c9b6;
+}
+
+.is-immersive #fullscreen-status.is-error {
+  color: #ffb4ab;
+}
+
 .player-heading {
   min-height: 47px;
   margin-bottom: 14px;
@@ -386,6 +461,7 @@ h1 span {
 }
 
 .player-actions button,
+.settings button,
 .archive-picker button,
 .touch-controls button {
   padding: 8px 12px;
@@ -395,6 +471,60 @@ h1 span {
   background: #eaf0e8;
   cursor: pointer;
   font-size: 11px;
+}
+
+.settings {
+  padding: 10px;
+  border: 1px solid #d8e1d5;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.settings summary { cursor: pointer; }
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+  font-size: 11px;
+}
+
+.settings-row input,
+.settings-row select,
+.player-actions select {
+  max-width: 100%;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid #b9c8b9;
+  border-radius: 6px;
+}
+
+#state-preview { image-rendering: pixelated; }
+#state-info { overflow-wrap: anywhere; }
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.volume-control input { width: 85px; }
+.volume-control output { min-width: 40px; }
+.is-immersive .volume-control { color: #b7c9b6; }
+.is-immersive #fps-status { color: #b7c9b6; margin: 0; }
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .is-immersive .touch-controls {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    pointer-events: none;
+    justify-content: space-between;
+  }
+  .is-immersive .touch-controls button { pointer-events: auto; opacity: .85; }
+  .is-immersive .screen-shell { margin: 0 120px; }
+  .is-immersive .system-controls { align-self: flex-end; }
 }
 
 button:disabled {

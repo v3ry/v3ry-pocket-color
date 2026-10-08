@@ -48,15 +48,30 @@
     }
     read(key) { return this.transaction(key, undefined, false); }
     write(key, data) { return this.transaction(key, data, true); }
-    async writeGame(key, data, recovery) {
+    async writeGame(key, data, recovery, previous) {
       const database = await this.open();
       return new Promise((resolve, reject) => {
         const transaction = database.transaction("games", "readwrite");
         const store = transaction.objectStore("games");
         store.put(data, key);
         if (recovery !== undefined) store.put(recovery, `backup:${key}`);
+        if (previous !== undefined) {
+          const request = store.get(`history:${key}`);
+          let historyError = null;
+          request.onsuccess = () => {
+            const history = request.result;
+            if (history !== undefined && (!Array.isArray(history) || history.length > 3
+              || history.some(copy => !Number.isSafeInteger(copy?.savedAt) || copy.savedAt < 0 || !copy.data))) {
+              historyError = new Error("Historique RAM invalide ; commit annule.");
+              transaction.abort();
+              return;
+            }
+            store.put([{ savedAt: Date.now(), data: previous }, ...(history || [])].slice(0, 3), `history:${key}`);
+          };
+          transaction.onabort = () => reject(historyError || transaction.error || new Error("Enregistrement RAM annule."));
+        }
         transaction.oncomplete = () => resolve();
-        transaction.onabort = () => reject(transaction.error || new Error("Enregistrement RAM annule."));
+        if (previous === undefined) transaction.onabort = () => reject(transaction.error || new Error("Enregistrement RAM annule."));
       });
     }
   }
@@ -87,7 +102,7 @@
         const data = this.cartridge.saveData(), revision = this.cartridge.saveRevision;
         const ramChanged = !data.ram.every((byte, index) => byte === this.committedData.ram[index]);
         const recovery = ramChanged && !this.recoverySaved ? this.recoveryData : undefined;
-        await this.store.writeGame(this.key, data, recovery);
+        await this.store.writeGame(this.key, data, recovery, ramChanged ? this.committedData : undefined);
         if (recovery !== undefined) this.recoverySaved = true;
         this.committedData = data;
         this.lastWriteKind = ramChanged ? "ram" : "rtc";

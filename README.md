@@ -30,6 +30,20 @@ Les raccourcis utilisent les positions physiques (`KeyboardEvent.code`) : A/Z su
 
 Cliquez sur l'ecran pour lui donner le focus apres avoir utilise un bouton de l'interface. Les boutons tactiles fonctionnent aussi a la souris et permettent plusieurs appuis simultanes. Le lecteur propose pause/reprise, redemarrage et activation/coupure du son. Les touches sont relachees lorsque la fenetre perd le focus.
 
+**Commandes et performances** permet de reaffecter les huit commandes. Cliquez sur Changer la touche, puis appuyez sur une touche physique ; Echap annule. Les touches deja affectees a une autre commande et les raccourcis reserves sont refuses. Clavier par defaut restaure les positions AZERTY/QWERTY. Le clavier, le volume (0 a 100 %) et l'affichage FPS sont conserves dans localStorage ; les erreurs de preferences sont signalees sans bloquer le jeu.
+
+Les manettes a disposition **standard** utilisent l'API native Gamepad : croix ou stick gauche (zone morte 0,35), bouton inferieur pour A, bouton droit pour B, boutons 8/9 pour Select/Start. Plusieurs manettes sont combinees avec le clavier et le tactile sans relacher une commande encore maintenue par une autre source. Les commandes sont relachees a la deconnexion, a la pause, pendant une saisie et quand la page perd le focus. Les manettes non standard sont signalees mais ne sont pas remappees automatiquement. Le navigateur peut exiger un appui initial et HTTPS/localhost.
+
+**F6** sauvegarde l'etat dans l'emplacement selectionne ; **F8** le recharge avec confirmation. Ces raccourcis ne s'appliquent pas pendant la saisie ni avec Ctrl/Alt/Meta. L'ecrasement d'un emplacement existant demande confirmation.
+
+L'affichage de performances mesure les images emulees par seconde, le temps CPU d'emulation par callback d'affichage et les rattrapages limites a 50 ms. Ce n'est pas une mesure de precision materielle ni un benchmark de compatibilite. Le budget temps reel tient compte du doublement de vitesse CPU CGB, pour conserver la cadence video/audio. En plein ecran paysage bas, les commandes tactiles sont disposees autour de l'image.
+
+### Plein ecran
+
+Le bouton **Plein ecran** ou la touche **F** agrandit le lecteur. **F**, **Echap** ou le bouton de sortie revient a l'interface normale. Pause, son, volume, etat rapide et commandes tactiles restent accessibles ; les panneaux de sauvegarde sont masques jusqu'a la sortie. Les boutons Etat/Charger utilisent l'emplacement selectionne avant le plein ecran. Sur un appareil a pointeur fin, la barre se masque apres 2,5 secondes : bougez le pointeur ou utilisez Tab pour la retrouver. Elle reste visible au focus clavier et sur les appareils tactiles. L'image garde ses proportions 160 x 144 avec des pixels nets et des bandes si necessaire. La partie et les sauvegardes ne sont pas reinitialisees. Les touches maintenues sont relachees et le focus revient a l'ecran.
+
+Si l'API Fullscreen est absente ou refusee, un message explique le passage a un mode immersif dans la page ; les barres du navigateur peuvent alors rester visibles. F est ignore pendant la saisie, avec Ctrl/Alt/Meta et lors de la repetition automatique.
+
 ## Coeur maison
 
 - `cpu.js` : instructions normales et CB du LR35902, flags, pile, interruptions, EI differe et HALT.
@@ -43,7 +57,7 @@ Cliquez sur l'ecran pour lui donner le focus apres avoir utilise un bouton de l'
 
 ### Limites de cette version experimentale
 
-Ce coeur ne promet pas la compatibilite d'un emulateur mature. Le rendu se fait par lignes avec des durees fixes : les effets raster au pixel pres, les restrictions d'acces VRAM/OAM et les subtilites du DMA/timer/APU ne sont pas reproduits au cycle exact. La synthese sonore est approximative. Le boot ROM est saute, certains registres demarrent avec des valeurs simplifiees. Pas de cable link ni manette. Les cartouches speciales (MBC6/7, camera, HuC, multicarts MBC1M...) ne sont pas prises en charge ; les types inconnus sont refuses explicitement. Le moteur de vibration MBC5 n'est pas emule.
+Ce coeur ne promet pas la compatibilite d'un emulateur mature. Le rendu se fait par lignes avec des durees fixes : les effets raster au pixel pres, les restrictions d'acces VRAM/OAM et les subtilites du DMA/timer/APU ne sont pas reproduits au cycle exact. La synthese sonore est approximative. Le boot ROM est saute, certains registres demarrent avec des valeurs simplifiees. Pas de cable link. Les cartouches speciales (MBC6/7, camera, HuC, multicarts MBC1M...) ne sont pas prises en charge ; les types inconnus sont refuses explicitement. Le moteur de vibration MBC5 n'est pas emule.
 
 ## Sauvegardes
 
@@ -55,9 +69,10 @@ Sauvegardez normalement depuis le menu du jeu. La RAM de la cartouche est enregi
 - L'identite du jeu est le SHA-256 du contenu de la ROM, pas son nom : une ROM renommee ou chargee depuis un ZIP retrouve la meme sauvegarde. Deux ROM differentes avec le meme titre restent distinctes.
 - L'horloge MBC3 est stockee avec son horodatage et avance pendant la fermeture du site, sauf si le jeu l'a mise en pause. Un commit de l'horloge seul ne remplace plus le message de restauration par une confirmation de sauvegarde in-game.
 - **Exporter .sav** telecharge la RAM brute (MBC2 : 512 octets, nibbles bas). Aucun fichier ROM ou ZIP n'est modifie.
-- **Importer .sav** exige la taille exacte de la RAM du jeu charge, demande confirmation, remplace la sauvegarde locale et redemarre le jeu en pause. Cliquez sur **Reprendre**, puis **Continuer** dans le jeu. L'horloge RTC locale est conservee. Les fichiers SAV avec un bloc RTC ajoute par un autre emulateur ne sont pas acceptes : le format importe/exporte contient uniquement la RAM. Une taille correcte ne prouve pas que le fichier appartient au jeu ou contient une progression valide.
-- **Recharger la RAM locale** relit la copie IndexedDB sans enregistrer la RAM courante, puis redemarre en pause. Confirmez l'abandon des modifications courantes.
+- **Importer .sav** exige la taille exacte de la RAM du jeu charge, demande confirmation, remplace la sauvegarde locale et redemarre le jeu automatiquement, sans pause. Choisissez **Continuer** dans le jeu. L'horloge RTC locale est conservee. Les fichiers SAV avec un bloc RTC ajoute par un autre emulateur ne sont pas acceptes : le format importe/exporte contient uniquement la RAM. Une taille correcte ne prouve pas que le fichier appartient au jeu ou contient une progression valide.
+- **Recharger la RAM locale** relit la copie IndexedDB sans enregistrer la RAM courante, puis redemarre automatiquement. Confirmez l'abandon des modifications courantes.
 - **Recuperer la RAM precedente** restaure la copie de recuperation. Avant la premiere modification RAM d'une session restauree, sa RAM originale est conservee dans une entree distincte ; les modifications RAM suivantes et les mises a jour de l'horloge ne font pas tourner cette copie. Un import explicite conserve aussi la RAM locale precedente. Le commit principal et la copie sont ecrits dans la meme transaction. Il s'agit d'une copie, pas d'un historique illimite ; elle ne peut pas recuperer des donnees perdues avant cette fonctionnalite.
+- **Historique RAM** conserve en plus les trois versions precedant les derniers commits qui modifient la RAM, avec date d'archivage. Les commits RTC seuls ne font pas tourner l'historique. Choisissez une copie, puis **Restaurer cette copie** : apres confirmation, le jeu redemarre automatiquement ; la version remplacee rejoint l'historique. Principal, recuperation et historique sont ecrits atomiquement. Ces copies ne garantissent pas la validite propre au jeu et ne recuperent pas des donnees perdues avant leur creation.
 - Les boutons import/export sont desactives pour les cartouches sans RAM, meme si elles disposent d'une horloge.
 - Les erreurs d'acces au stockage ou les sauvegardes invalides sont affichees. Le chargement d'un jeu avec sauvegarde est alors annule plutot que d'ecraser une sauvegarde existante. En cas d'echec d'enregistrement, le jeu actuel reste en memoire et peut etre exporte ; le changement de jeu est bloque jusqu'a ce que le commit reussisse.
 
@@ -67,8 +82,8 @@ Une tentative de commit est faite quand la page devient cachee ou se ferme, et u
 
 ### Etat : reprendre a un instant precis (.state)
 
-- **Sauvegarder l'etat** enregistre manuellement un emplacement local par ROM, independamment de la RAM in-game. Les enregistrements suivants remplacent cet emplacement.
-- **Charger l'etat** restaure cet emplacement en pause : cliquez sur **Reprendre**. Il ne redemarre pas le jeu et ne passe pas par son menu Continuer.
+- **Sauvegarder l'etat** enregistre l'un des trois emplacements locaux par ROM, independamment de la RAM in-game, avec un nom facultatif, une date et une miniature. Remplacer un emplacement demande confirmation. Les anciens etats locaux restent accessibles dans l'emplacement 1. Changer d'emplacement affiche ses informations sans charger le jeu.
+- **Charger l'etat** restaure l'emplacement selectionne et reprend automatiquement, meme si le jeu etait en pause. Il ne redemarre pas le jeu et ne passe pas par son menu Continuer. Les imports et recuperations reprennent aussi automatiquement ; un onglet cache attend naturellement son retour au premier plan.
 - **Exporter .state** cree un fichier de l'instant courant. **Importer .state** recharge un fichier de cet emulateur. Le format JSON versionne est specifique a v3ry Pocket Color, limite a 4 Mio, et lie au SHA-256 exact de la ROM ; une autre version du jeu ou un fichier corrompu est refuse avant de toucher la machine.
 - Les instantanes contiennent CPU et interruptions, WRAM/VRAM/OAM, palettes et image, timers et DMA, canaux audio, banques et RAM de cartouche et horloge. Ils ne contiennent pas la ROM, les touches physiques actuellement maintenues ni les buffers audio deja envoyes au navigateur. L'horloge est ramenee a l'instant sauvegarde, sans ajouter le temps reel ecoule.
 - **Protection in-game** : apres chargement d'un etat, l'enregistrement automatique RAM/RTC est suspendu. Sauvegarder dans le jeu modifie la RAM de cet etat, mais pas votre `.sav` locale. **Exporter .sav** permet de garder cette RAM ; **Enregistrer la RAM** demande une confirmation pour en faire la sauvegarde in-game locale et reactiver l'automatisme. Une copie de recuperation est conservee.
@@ -85,6 +100,6 @@ Avec Node.js recent (22 ou plus) :
 node --test tests/app.test.cjs tests/cpu.test.cjs tests/emulator.test.cjs tests/zip.test.cjs tests/saves.test.cjs tests/states.test.cjs
 ```
 
-Les tests couvrent le processeur, les banques de cartouche, les timers, la video, les commandes et les archives ZIP (stockees et compressees, multiples ROM, CRC et fichiers invalides). L'interface est aussi testee avec un DOM minimal : activation initiale du son, pause, erreurs d'emulation et chargements concurrents.
+Les tests couvrent le processeur (dont les immediats signes SP), les banques de cartouche, les quatre frequences timer, la video, la cadence video/audio CGB en double vitesse, les commandes et les archives ZIP (stockees et compressees, multiples ROM, CRC et fichiers invalides). L'interface est aussi testee avec un DOM minimal : activation initiale du son, volume, preferences clavier, manettes, plein ecran, reprise automatique apres restauration, emplacements d'etat, historique RAM, FPS, erreurs d'emulation et chargements concurrents.
 
 Utilisez uniquement des ROM que vous etes autorise a utiliser.

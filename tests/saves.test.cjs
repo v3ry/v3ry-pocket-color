@@ -49,6 +49,53 @@ test("main RAM and recovery share one transaction and resolve only after commit"
   await assert.rejects(failed, /Quota exceeded/);
 });
 
+test("RAM history is bounded and RTC-only commits leave it unchanged", async () => {
+  const store = memorySaveStore(), cart = new Cartridge(makeROM({ type: 0x10, ramSize: 2 }));
+  const session = new SaveSession(store, "game", cart);
+  for (let value = 1; value <= 6; value++) {
+    cart.importRAM(new Uint8Array(8192).fill(value));
+    await session.flush();
+  }
+  const history = store.records.get("history:game");
+  assert.equal(history.length, 3);
+  assert.deepEqual(history.map(copy => copy.data.ram[0]), [5, 4, 3]);
+  cart.lastRTC -= 2100;
+  await session.flush();
+  assert.deepEqual(store.records.get("history:game"), history);
+});
+
+test("IndexedDB history shares the commit transaction and corrupt history aborts it", async () => {
+  const store = new SaveStore(null, null), writes = [];
+  let transaction, request, count = 0;
+  store.database = {
+    transaction() {
+      count++;
+      transaction = {
+        objectStore: () => ({
+          put: (data, key) => writes.push({ data, key }),
+          get(key) { assert.equal(key, "history:key"); request = {}; return request; },
+        }),
+        abort() { this.onabort(); },
+      };
+      return transaction;
+    },
+  };
+  const previous = { ram: new Uint8Array([9]) };
+  const pending = store.writeGame("key", {}, {}, previous);
+  await new Promise(resolve => setImmediate(resolve));
+  request.result = [8, 7, 6].map(value => ({ savedAt: value, data: { ram: new Uint8Array([value]) } }));
+  request.onsuccess();
+  assert.equal(count, 1);
+  assert.deepEqual(writes.at(-1).data.map(copy => copy.data.ram[0]), [9, 8, 7]);
+  transaction.oncomplete();
+  await pending;
+  const invalid = store.writeGame("key", {}, {}, previous);
+  await new Promise(resolve => setImmediate(resolve));
+  request.result = [null];
+  request.onsuccess();
+  await assert.rejects(invalid, /Historique RAM invalide/);
+});
+
 test("SAV import/export copies RAM, validates before mutation and masks MBC2 nibbles", () => {
   for (const type of [3, 6, 0x10, 0x1b]) {
     const cart = new Cartridge(makeROM({ type, ramSize: 3 }));

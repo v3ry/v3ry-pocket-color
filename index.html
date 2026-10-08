@@ -92,18 +92,53 @@
           <button id="pause-button" type="button" disabled>Pause</button>
           <button id="reset-button" type="button" disabled>Redémarrer</button>
           <button id="sound-button" type="button" aria-pressed="false">Activer le son</button>
+          <button id="fullscreen-button" type="button" aria-pressed="false" aria-keyshortcuts="F">Plein écran</button>
+          <button id="quick-save" class="immersive-only" type="button" disabled>État · F6</button>
+          <button id="quick-load" class="immersive-only" type="button" disabled>Charger · F8</button>
+          <label class="volume-control" for="volume">Volume <input id="volume" type="range" min="0" max="100" value="70"><output id="volume-value" for="volume">70 %</output></label>
         </div>
+        <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
+        <details class="settings">
+          <summary>Commandes et performances</summary>
+          <p id="gamepad-status" class="status-message" role="status">Manette : connectez une manette standard et appuyez sur un bouton.</p>
+          <div class="settings-row">
+            <label for="key-action">Commande à personnaliser</label>
+            <select id="key-action">
+              <option value="0">Droite</option><option value="1">Gauche</option>
+              <option value="2">Haut</option><option value="3">Bas</option>
+              <option value="4">A</option><option value="5">B</option>
+              <option value="6">Select</option><option value="7">Start</option>
+            </select>
+            <button id="bind-key" type="button">Changer la touche</button>
+            <button id="reset-keys" type="button">Clavier par défaut</button>
+          </div>
+          <p id="key-status" class="status-message" role="status"></p>
+          <label><input id="show-fps" type="checkbox"> Afficher FPS et temps d’émulation</label>
+          <p id="preferences-status" class="status-message" role="status" hidden></p>
+        </details>
+        <p id="fps-status" class="status-message" role="status" hidden></p>
         <h3 class="save-heading">Sauvegarde in-game · mémoire de cartouche</h3>
         <div class="player-actions" aria-label="Sauvegardes in-game">
           <button id="save-button" type="button" disabled>Enregistrer la RAM</button>
           <button id="reload-save" type="button" disabled>Recharger la RAM locale</button>
           <button id="recover-save" type="button" disabled>Récupérer la RAM précédente</button>
+          <label for="ram-history">Historique RAM</label>
+          <select id="ram-history"><option value="">Aucune copie historique</option></select>
+          <button id="restore-history" type="button" disabled>Restaurer cette copie</button>
           <button id="export-save" type="button" disabled>Exporter .sav</button>
           <button id="import-save" type="button" disabled>Importer .sav</button>
           <input id="save-file" type="file" accept=".sav" hidden>
         </div>
         <p class="status-message" id="save-status" role="status" aria-live="polite">Les sauvegardes restent dans ce navigateur.</p>
         <h3 class="save-heading">Sauvegarde d’état · reprendre au même instant</h3>
+        <div class="state-slot settings-row">
+          <label for="state-slot">Emplacement</label>
+          <select id="state-slot"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+          <label for="state-name">Nom</label>
+          <input id="state-name" type="text" maxlength="60" placeholder="Ma partie">
+          <img id="state-preview" width="80" height="72" alt="Miniature de l’état enregistré" hidden>
+          <span id="state-info">Emplacement vide</span>
+        </div>
         <div class="player-actions" aria-label="Sauvegardes d’état">
           <button id="save-state" type="button" disabled>Sauvegarder l’état</button>
           <button id="load-state" type="button" disabled>Charger l’état</button>
@@ -134,10 +169,11 @@
         <div class="help-icon" aria-hidden="true">?</div>
         <div>
           <h2>Prêt à jouer ?</h2>
-          <p>Clavier : flèches pour se déplacer. Boutons A/B : touches A/Z sur AZERTY, Q/W sur QWERTY. Entrée pour Start et Maj pour Select. Cliquez sur l’écran pour lui donner le focus. Des boutons tactiles sont aussi disponibles.</p>
+          <p>Clavier par défaut : flèches, A/Z sur AZERTY ou Q/W sur QWERTY, Entrée et Maj. Touches personnalisables dans Commandes et performances. F6 sauvegarde l’état sélectionné, F8 le recharge après confirmation. Manette standard : croix/stick gauche, boutons inférieurs A/B, Select et Start. Des boutons tactiles sont aussi disponibles.</p>
+          <p>Plein écran : bouton Plein écran ou touche F ; Échap pour quitter. Si le navigateur ne le permet pas, un mode immersif dans la page est proposé.</p>
           <p>ZIP : compression standard ou fichiers non compressés. Si plusieurs ROM sont présentes, choisissez le jeu à lancer. Le cœur maison est expérimental : certains jeux peuvent présenter des défauts.</p>
           <p>In-game : sauvegardez depuis le menu du jeu, puis choisissez Continuer au prochain lancement. L’enregistrement de la RAM ne garantit pas que le jeu y a écrit une sauvegarde valide. Les .sav contiennent la RAM, sans l’horloge.</p>
-          <p>État : Sauvegarder l’état mémorise l’instant complet ; Charger l’état reprend à cet instant, en pause. Un état chargé ne remplace pas votre sauvegarde in-game : son enregistrement automatique est suspendu. Redémarrer retrouve la RAM in-game locale.</p>
+          <p>État : trois emplacements avec nom, date et miniature. Charger l’état reprend automatiquement à cet instant. Un état chargé ne remplace pas votre sauvegarde in-game : son enregistrement automatique est suspendu. Redémarrer retrouve la RAM in-game locale.</p>
           <p class="legal-note">Utilisez uniquement des jeux que vous êtes autorisé à utiliser. Aucune ROM n’est fournie avec ce site.</p>
         </div>
       </aside>

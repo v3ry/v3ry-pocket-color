@@ -146,6 +146,49 @@ test("CGB speed switch halves PPU clocks but not CPU timer clocks; serial IRQ", 
   assert.equal(gb.serialOutput, "A"); assert.equal(gb.read(0xff01), 255); assert.equal(gb.io[0x0f] & 8, 8);
 });
 
+test("real-time CGB budget keeps video and audio cadence at both CPU speeds", () => {
+  const rom = makeROM({ color: true, program: [0x18, 0xfe] });
+  const normal = new GameBoy(rom), fast = new GameBoy(rom);
+  fast.write(0xff4d, 1);
+  fast.switchSpeed();
+  normal.runCycles(70224 * 2);
+  const fastElapsed = fast.runCycles(70224 * 2);
+  assert.equal(normal.frames, 2);
+  assert.equal(fast.frames, 2);
+  assert.ok(Math.abs(normal.dot - fast.dot) <= 12);
+  assert.equal(normal.ly, fast.ly);
+  assert.ok(Math.abs(normal.apu.drain().length - fast.apu.drain().length) <= 2);
+  assert.ok(fastElapsed >= 70224 * 2 && fastElapsed < 70224 * 2 + 6);
+  assert.equal(fast.div, (fastElapsed * 2) & 65535);
+});
+
+test("real-time budget handles a speed switch inside the running ROM", () => {
+  const gb = new GameBoy(makeROM({ color: true, program: [
+    0x3e, 1, 0xe0, 0x4d, 0x10, 0, 0x18, 0xfe,
+  ] }));
+  gb.runCycles(70224 * 2);
+  assert.equal(gb.doubleSpeed, true);
+  assert.equal(gb.frames, 2);
+  assert.ok(gb.ly <= 1);
+});
+
+test("all timer frequencies use falling edges and disabling TAC increments once", () => {
+  for (const [selector, period] of [1024, 16, 64, 256].entries()) {
+    const gb = new GameBoy(makeROM());
+    gb.write(0xff04, 0);
+    gb.write(0xff07, 4 | selector);
+    gb.tick(period - 1);
+    assert.equal(gb.io[5], 0);
+    gb.tick(1);
+    assert.equal(gb.io[5], 1);
+    gb.tick(period / 2);
+    gb.write(0xff07, 0);
+    assert.equal(gb.io[5], 2);
+    gb.tick(period * 2);
+    assert.equal(gb.io[5], 2);
+  }
+});
+
 test("APU generates finite stereo samples, triggers channels and disables DAC", () => {
   const apu = new APU(48000);
   apu.write(0xff11, 0x80); apu.write(0xff12, 0xf3);

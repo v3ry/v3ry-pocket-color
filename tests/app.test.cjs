@@ -19,23 +19,26 @@ class Element {
     this.hidden = false;
     this.files = [];
     this.disabled = false;
+    this.checked = false;
     this.classes = new Set();
     this.classList = {
       toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name),
       add: name => this.classes.add(name), remove: name => this.classes.delete(name),
+      contains: name => this.classes.has(name),
     };
   }
   addEventListener(name, callback) { this.listeners.set(name, callback); }
   fire(name, event = {}) { return this.listeners.get(name)?.(event); }
   setAttribute(name, value) { this[name] = value; }
   closest() { return null; }
+  focus() {}
   replaceChildren(...children) { this.children = children; this.value = children[0]?.value || ""; }
   click() { return this.fire("click"); }
   append() {}
   remove() {}
 }
 
-function harness(store = memorySaveStore()) {
+function harness(store = memorySaveStore(), preferences = new Map()) {
   const elements = new Map();
   const element = selector => {
     if (!elements.has(selector)) elements.set(selector, new Element());
@@ -44,6 +47,7 @@ function harness(store = memorySaveStore()) {
   const canvas = element("#game-canvas");
   const context = { putImageData: image => { canvas.image = image; } };
   canvas.getContext = () => context;
+  canvas.toDataURL = () => "data:image/png;base64,AAAA";
   const window = new Element(), document = new Element();
   document.querySelector = element;
   document.querySelectorAll = () => [];
@@ -59,13 +63,19 @@ function harness(store = memorySaveStore()) {
   window.confirm = () => true;
   window.setInterval = callback => { intervals.push(callback); return intervals.length; };
   window.setTimeout = callback => callback();
+  window.clearTimeout = () => {};
+  window.localStorage = { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) };
   class AudioContext {
     constructor() { this.state = "running"; this.sampleRate = 48000; this.currentTime = 0; }
     async resume() { this.state = "running"; }
     async suspend() { this.state = "suspended"; }
+    createGain() {
+      return { gain: { value: 1, setValueAtTime(value) { this.value = value; } }, connect() {} };
+    }
   }
   const scope = vm.createContext({
-    document, window, PocketGameBoy: GameBoy, PocketZIP: ZIP,
+    document, window, navigator: { getGamepads: () => [] }, performance,
+    PocketGameBoy: GameBoy, PocketZIP: ZIP,
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
     Uint8Array, AudioContext, ImageData: class { constructor(data) { this.data = data; } },
@@ -84,7 +94,7 @@ function harness(store = memorySaveStore()) {
     callback(time);
   };
   const evaluate = expression => vm.runInContext(expression, scope);
-  return { element, evaluate, window, errors, pending, scope, store, intervals, downloads, created };
+  return { element, evaluate, window, document, preferences, errors, pending, scope, store, intervals, downloads, created };
 }
 function file(name, bytes) {
   return { name, size: bytes.length, arrayBuffer: async () => bytes.slice().buffer };
@@ -120,6 +130,54 @@ test("first audio click enables sound; second click mutes it", async () => {
   await h.element("#sound-button").fire("click");
   assert.equal(h.evaluate("audioContext.state"), "suspended");
   assert.equal(h.element("#sound-button")["aria-pressed"], "false");
+});
+
+test("fullscreen enters/exits natively and browser Escape updates the button", async () => {
+  const h = harness(), player = h.element(".player-column");
+  h.document.fullscreenEnabled = true;
+  player.requestFullscreen = async () => { h.document.fullscreenElement = player; };
+  h.document.exitFullscreen = async () => { h.document.fullscreenElement = null; };
+  await h.element("#fullscreen-button").fire("click");
+  assert.equal(player.classes.has("is-immersive"), true);
+  assert.equal(h.element("#fullscreen-button")["aria-pressed"], "true");
+  await h.element("#fullscreen-button").fire("click");
+  assert.equal(player.classes.has("is-immersive"), false);
+  await h.element("#fullscreen-button").fire("click");
+  h.document.fullscreenElement = null;
+  h.document.fire("fullscreenchange");
+  assert.equal(h.element("#fullscreen-button")["aria-pressed"], "false");
+});
+
+test("unsupported or rejected fullscreen falls back explicitly and Escape exits", async () => {
+  for (const rejected of [false, true]) {
+    const h = harness();
+    if (rejected) {
+      h.document.fullscreenEnabled = true;
+      h.element(".player-column").requestFullscreen = async () => { throw new Error("Denied"); };
+    }
+    await h.element("#fullscreen-button").fire("click");
+    assert.equal(h.document.body.classes.has("is-immersive"), true);
+    assert.match(h.element("#fullscreen-status").textContent, /immersif actif/);
+    if (rejected) assert.match(h.element("#fullscreen-status").textContent, /Denied/);
+    h.window.fire("keydown", { code: "Escape", preventDefault() {} });
+    assert.equal(h.document.body.classes.has("is-immersive"), false);
+  }
+});
+
+test("F shortcut excludes text entry, modifiers and repeats and preserves the machine", async () => {
+  const h = harness();
+  await load(h, "demo.gb", makeDemoROM());
+  const game = h.evaluate("emulator");
+  for (const patch of [{ repeat: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true },
+    { target: { closest: () => ({}) } }]) {
+    h.window.fire("keydown", { code: "KeyF", target: new Element(), preventDefault() {}, ...patch });
+    assert.equal(h.evaluate("immersiveFallback"), false);
+  }
+  h.window.fire("keydown", { code: "KeyF", target: new Element(), preventDefault() {} });
+  assert.equal(h.evaluate("immersiveFallback"), true);
+  assert.equal(h.evaluate("emulator"), game);
+  assert.equal(h.evaluate("paused"), false);
+  assert.equal(h.pending.size, 1);
 });
 
 test("UI opens compressed ZIPs, offers multiple games and selects GB", async () => {
@@ -220,7 +278,7 @@ test("autosave survives a new page session, restart, rename and loading the same
   await load(h, "first.gb", rom);
   h.evaluate("emulator.cartridge.control(0, 10); emulator.cartridge.writeRAM(0xa123, 0x42)");
   await h.intervals[0]();
-  assert.equal(store.records.size, 1);
+  assert.equal(store.records.size, 2);
   assert.match(h.element("#save-status").textContent, /enregistrée/);
   h.evaluate("emulator.cartridge.writeRAM(0xa123, 0x56)");
   await h.element("#reset-button").fire("click");
@@ -230,7 +288,7 @@ test("autosave survives a new page session, restart, rename and loading the same
   assert.equal(fresh.evaluate("emulator.cartridge.ram[0x123]"), 0x56);
   await load(fresh, "game.zip", makeZIP([{ name: "nested/again.gb", data: rom }], { method: 8 }));
   assert.equal(fresh.evaluate("emulator.cartridge.ram[0x123]"), 0x56);
-  assert.equal(store.records.size, 1);
+  assert.equal(store.records.size, 2);
 });
 
 test("changing ROM commits the old game without leaking its RAM into the new one", async () => {
@@ -387,7 +445,8 @@ test("reload local RAM discards unsaved running RAM; recovery can restore the pr
   await h.element("#reload-save").fire("click");
   assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 0x55);
   assert.equal(h.store.records.get(key).ram[0], 0x55);
-  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.evaluate("paused"), false);
+  assert.equal(h.pending.size, 1);
   h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(0))");
   await h.intervals[0]();
   assert.equal(h.store.records.get(key).ram[0], 0);
@@ -412,7 +471,8 @@ test("states survive reload, restore the same instant and cannot autosave over i
   assert.equal(fresh.evaluate("emulator.cpu.pc"), pc);
   assert.equal(fresh.evaluate("emulator.dot"), dot);
   assert.equal(fresh.evaluate("emulator.read(0xc123)"), 0x77);
-  assert.equal(fresh.evaluate("paused"), true);
+  assert.equal(fresh.evaluate("paused"), false);
+  assert.equal(fresh.pending.size, 1);
   assert.equal(fresh.evaluate("stateMode"), true);
   fresh.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(9))");
   await fresh.intervals[0]();
@@ -445,7 +505,8 @@ test("local RAM reload waits for an in-flight commit and restores the committed 
   assert.equal(h.evaluate("saveSession.committedData.ram[0]"), 2);
   const key = await h.store.keyFor(rom);
   assert.equal(h.store.records.get(key).ram[0], 2);
-  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.evaluate("paused"), false);
+  assert.equal(h.pending.size, 1);
 });
 
 test("state RAM replaces SAV only after explicit confirmation, with recovery preserved", async () => {
@@ -502,9 +563,8 @@ test("a synthetic game sees the imported in-game save in the correct SRAM bank a
   const ram = new Uint8Array(32768); ram[2 * 8192] = 0x77;
   h.element("#save-file").files = [file("game.sav", ram)];
   await h.element("#save-file").fire("change");
-  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.evaluate("paused"), false);
   assert.equal(h.evaluate("emulator.cpu.pc"), 0x100);
-  await h.element("#pause-button").fire("click");
   h.evaluate("advance(0); advance(17)");
   assert.equal(h.evaluate("emulator.wram[0]"), 1);
   const fresh = harness(h.store);
@@ -513,4 +573,201 @@ test("a synthetic game sees the imported in-game save in the correct SRAM bank a
   assert.equal(fresh.evaluate("emulator.wram[0]"), 1);
   const key = await h.store.keyFor(rom);
   assert.equal(h.store.records.get(key).ram[2 * 8192], 0x77);
+});
+
+test("volume, FPS and physical key mappings persist and conflicts are refused", async () => {
+  const h = harness();
+  await h.element("#sound-button").fire("click");
+  h.element("#volume").value = "25";
+  h.element("#volume").fire("input");
+  assert.equal(h.evaluate("audioGain.gain.value"), 0.25);
+  h.element("#show-fps").checked = true;
+  h.element("#show-fps").fire("change");
+  h.element("#key-action").value = "4";
+  h.element("#bind-key").fire("click");
+  const press = code => h.window.fire("keydown", { code, target: new Element(), preventDefault() {} });
+  press("ArrowLeft");
+  assert.match(h.element("#key-status").textContent, /déjà utilisée/);
+  press("KeyF");
+  assert.match(h.element("#key-status").textContent, /réservée/);
+  press("KeyX");
+  assert.equal(h.evaluate("keys.get('KeyX')"), 4);
+  assert.equal(h.evaluate("keys.has('KeyQ')"), false);
+  const fresh = harness(h.store, h.preferences);
+  assert.equal(fresh.evaluate("volume"), 0.25);
+  assert.equal(fresh.evaluate("keys.get('KeyX')"), 4);
+  assert.equal(fresh.element("#show-fps").checked, true);
+  await load(fresh, "demo.gb", makeDemoROM());
+  fresh.window.fire("keydown", { code: "KeyX", target: new Element(), preventDefault() {} });
+  assert.equal(fresh.evaluate("emulator.buttons"), 1 << 4);
+  fresh.element("#reset-keys").fire("click");
+  assert.equal(fresh.evaluate("emulator.buttons"), 0);
+  assert.equal(fresh.evaluate("keys.get('KeyQ')"), 4);
+});
+
+test("unavailable preference storage is reported without preventing play", async () => {
+  const h = harness();
+  h.window.localStorage.setItem = () => { throw new Error("Access denied"); };
+  h.element("#volume").value = "0";
+  h.element("#volume").fire("input");
+  assert.match(h.element("#preferences-status").textContent, /Access denied/);
+  assert.equal(h.evaluate("volume"), 0);
+  await load(h, "demo.gb", makeDemoROM());
+  assert.ok(h.evaluate("emulator"));
+});
+
+test("standard gamepads merge with keyboard, release on disconnect and respect focus and pause", async () => {
+  const h = harness();
+  await load(h, "demo.gb", makeDemoROM());
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false }));
+  buttons[0].pressed = true;
+  const pad = { connected: true, mapping: "standard", buttons, axes: [0.5, -0.5] };
+  h.scope.navigator.getGamepads = () => [null, pad];
+  h.evaluate("pollGamepads()");
+  assert.equal(h.evaluate("emulator.buttons"), (1 << 4) | 1 | (1 << 2));
+  h.window.fire("keydown", { code: "KeyQ", target: new Element(), preventDefault() {} });
+  h.scope.navigator.getGamepads = () => [];
+  h.evaluate("pollGamepads()");
+  assert.equal(h.evaluate("emulator.buttons"), 1 << 4);
+  h.window.fire("keyup", { code: "KeyQ" });
+  assert.equal(h.evaluate("emulator.buttons"), 0);
+  h.scope.navigator.getGamepads = () => [pad];
+  h.window.fire("blur");
+  h.evaluate("pollGamepads()");
+  assert.equal(h.evaluate("emulator.buttons"), 0);
+  h.window.fire("focus");
+  await h.element("#pause-button").fire("click");
+  h.evaluate("pollGamepads()");
+  assert.equal(h.evaluate("emulator.buttons"), 0);
+  await h.element("#pause-button").fire("click");
+  h.evaluate("pollGamepads()");
+  assert.equal(h.evaluate("emulator.buttons"), (1 << 4) | 1 | (1 << 2));
+  pad.mapping = "";
+  h.evaluate("pollGamepads()");
+  assert.equal(h.evaluate("emulator.buttons"), 0);
+  assert.match(h.element("#gamepad-status").textContent, /non standard/);
+});
+
+test("three independent state slots keep names previews and legacy slot one", async () => {
+  const h = harness(), rom = makeROM({ type: 3, ramSize: 2, program: [0x18, 0xfe] });
+  await load(h, "game.gb", rom);
+  const key = await h.store.keyFor(rom);
+  for (let slot = 1; slot <= 3; slot++) {
+    h.element("#state-slot").value = String(slot);
+    await h.element("#state-slot").fire("change");
+    h.element("#state-name").value = `Partie ${slot}`;
+    h.evaluate(`emulator.wram[123] = ${slot}`);
+    await h.element("#save-state").fire("click");
+  }
+  assert.equal(h.store.records.get(`state:${key}`).name, "Partie 1");
+  const fresh = harness(h.store);
+  await load(fresh, "game.gb", rom);
+  for (let slot = 1; slot <= 3; slot++) {
+    fresh.element("#state-slot").value = String(slot);
+    await fresh.element("#state-slot").fire("change");
+    assert.equal(fresh.element("#state-name").value, `Partie ${slot}`);
+    assert.equal(fresh.element("#state-preview").hidden, false);
+    await fresh.element("#load-state").fire("click");
+    assert.equal(fresh.evaluate("emulator.wram[123]"), slot);
+    assert.equal(fresh.evaluate("paused"), false);
+    assert.equal(fresh.pending.size, 1);
+  }
+  fresh.window.confirm = () => false;
+  fresh.evaluate("emulator.wram[123] = 9");
+  await fresh.element("#save-state").fire("click");
+  assert.equal(h.store.records.get(`state:${key}:3`).memory.wram[123], 3);
+});
+
+test("historical RAM restoration resumes automatically and preserves main SAV from states", async () => {
+  const h = harness(), rom = makeROM({ type: 3, ramSize: 2 });
+  await load(h, "game.gb", rom);
+  for (let value = 1; value <= 5; value++) {
+    h.evaluate(`emulator.cartridge.importRAM(new Uint8Array(8192).fill(${value}))`);
+    await h.evaluate("saveCurrent()");
+  }
+  const key = await h.store.keyFor(rom);
+  assert.equal(h.store.records.get(`history:${key}`).length, 3);
+  assert.deepEqual(h.store.records.get(`history:${key}`).map(copy => copy.data.ram[0]), [4, 3, 2]);
+  h.element("#ram-history").value = "1";
+  await h.element("#restore-history").fire("click");
+  assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 3);
+  assert.equal(h.store.records.get(key).ram[0], 3);
+  assert.equal(h.evaluate("paused"), false);
+  assert.equal(h.pending.size, 1);
+});
+
+test("FPS diagnostics measure emulated frames and report bounded catch-up", async () => {
+  const h = harness();
+  await load(h, "game.gbc", makeROM({ color: true, program: [0x18, 0xfe] }));
+  h.element("#show-fps").checked = true;
+  h.element("#show-fps").fire("change");
+  for (let time = 0; time <= 1050; time += 17) h.evaluate(`advance(${time})`);
+  assert.match(h.element("#fps-status").textContent, /^5[89]\.\d FPS jeu/);
+  h.evaluate("advance(2200)");
+  assert.match(h.element("#fps-status").textContent, /1 rattrapage/);
+});
+
+test("every successful restore leaves a previously paused game running with a single callback", async () => {
+  const h = harness(), rom = makeROM({ type: 3, ramSize: 2, program: [0x18, 0xfe] });
+  await load(h, "game.gb", rom);
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(1))");
+  await h.evaluate("saveCurrent()");
+  await h.element("#save-state").fire("click");
+  await h.element("#export-state").fire("click");
+  const blob = h.downloads.at(-1);
+  const restores = [
+    () => h.element("#reload-save").fire("click"),
+    async () => {
+      h.element("#save-file").files = [file("game.sav", new Uint8Array(8192).fill(2))];
+      await h.element("#save-file").fire("change");
+    },
+    () => h.element("#recover-save").fire("click"),
+    () => h.element("#load-state").fire("click"),
+    async () => {
+      h.element("#state-file").files = [{ name: "game.state", size: blob.size, text: () => blob.text() }];
+      await h.element("#state-file").fire("change");
+    },
+  ];
+  for (const restore of restores) {
+    await h.element("#pause-button").fire("click");
+    assert.equal(h.evaluate("paused"), true);
+    assert.equal(h.pending.size, 0);
+    await restore();
+    assert.equal(h.evaluate("paused"), false);
+    assert.equal(h.pending.size, 1);
+    assert.equal(h.element("#pause-button").textContent, "Pause");
+  }
+});
+
+test("F6/F8 use the selected slot without taking over text entry", async () => {
+  const h = harness();
+  await load(h, "game.gb", makeROM({ program: [0x18, 0xfe] }));
+  h.element("#state-slot").value = "2";
+  const key = h.evaluate("gameKey");
+  h.evaluate("emulator.wram[123] = 6");
+  h.window.fire("keydown", { code: "F6", target: { closest: () => ({}) }, preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.store.records.has(`state:${key}:2`), false);
+  h.window.fire("keydown", { code: "F6", target: new Element(), preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.store.records.get(`state:${key}:2`).memory.wram[123], 6);
+  h.evaluate("emulator.wram[123] = 9");
+  h.window.fire("keydown", { code: "F8", target: new Element(), preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.evaluate("emulator.wram[123]"), 6);
+  assert.equal(h.evaluate("paused"), false);
+  assert.equal(h.pending.size, 1);
+});
+
+test("quick-state success and failures are visible inside the immersive player", async () => {
+  const h = harness();
+  await load(h, "game.gb", makeROM({ program: [0x18, 0xfe] }));
+  await h.element("#fullscreen-button").fire("click");
+  await h.element("#quick-save").fire("click");
+  assert.equal(h.element("#fullscreen-status").hidden, false);
+  assert.match(h.element("#fullscreen-status").textContent, /État 1 enregistré/);
+  h.store.read = async () => { throw new Error("Access denied"); };
+  await h.element("#quick-load").fire("click");
+  assert.match(h.element("#fullscreen-status").textContent, /Access denied/);
+  assert.equal(h.element("#fullscreen-status").classes.has("is-error"), true);
 });
