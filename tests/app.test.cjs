@@ -9,6 +9,7 @@ const { GameBoy } = require("../emulator.js");
 const ZIP = require("../zip.js");
 const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./helpers.cjs");
 const { SaveSession } = require("../saves.js");
+const States = require("../states.js");
 
 class Element {
   constructor() {
@@ -66,6 +67,7 @@ function harness(store = memorySaveStore()) {
   const scope = vm.createContext({
     document, window, PocketGameBoy: GameBoy, PocketZIP: ZIP,
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
+    PocketStates: States,
     Uint8Array, AudioContext, ImageData: class { constructor(data) { this.data = data; } },
     Blob, URL: {
       createObjectURL: blob => { downloads.push(blob); return "blob:test"; },
@@ -358,4 +360,157 @@ test("SAV import preserves RTC, and clock-only cartridges cannot import/export R
   assert.equal(h.element("#save-button").disabled, false);
   assert.equal(h.element("#export-save").disabled, true);
   assert.equal(h.element("#import-save").disabled, true);
+});
+
+test("RTC at boot cannot overwrite the RAM restored message or change the saved RAM", async () => {
+  const h = harness(), rom = makeROM({ type: 0x10, ramSize: 3 });
+  const saved = new GameBoy(rom).cartridge;
+  saved.importRAM(new Uint8Array(32768).fill(0x44));
+  const key = await h.store.keyFor(rom);
+  await h.store.write(key, saved.saveData());
+  await load(h, "clock.gb", rom);
+  const message = h.element("#save-status").textContent;
+  assert.match(message, /restaurée avant/);
+  h.evaluate("emulator.cartridge.lastRTC -= 2100");
+  await h.intervals[0]();
+  assert.equal(h.element("#save-status").textContent, message);
+  assert.equal(h.store.records.get(key).ram[0], 0x44);
+});
+
+test("reload local RAM discards unsaved running RAM; recovery can restore the pre-boot copy", async () => {
+  const h = harness(), rom = makeROM({ type: 3, ramSize: 2 }), cart = new GameBoy(rom).cartridge;
+  cart.importRAM(new Uint8Array(8192).fill(0x55));
+  const key = await h.store.keyFor(rom);
+  await h.store.write(key, cart.saveData());
+  await load(h, "game.gb", rom);
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(0x33))");
+  await h.element("#reload-save").fire("click");
+  assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 0x55);
+  assert.equal(h.store.records.get(key).ram[0], 0x55);
+  assert.equal(h.evaluate("paused"), true);
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(0))");
+  await h.intervals[0]();
+  assert.equal(h.store.records.get(key).ram[0], 0);
+  await h.element("#recover-save").fire("click");
+  assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 0x55);
+  assert.equal(h.store.records.get(key).ram[0], 0x55);
+});
+
+test("states survive reload, restore the same instant and cannot autosave over in-game RAM", async () => {
+  const h = harness(), rom = makeROM({ type: 3, ramSize: 2, program: [0x18, 0xfe] });
+  await load(h, "game.gb", rom);
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(1))");
+  await h.evaluate("saveCurrent(true)");
+  h.evaluate("emulator.runCycles(10000); emulator.write(0xc123, 0x77)");
+  const pc = h.evaluate("emulator.cpu.pc"), dot = h.evaluate("emulator.dot");
+  await h.element("#save-state").fire("click");
+  const key = await h.store.keyFor(rom);
+  assert.equal(h.store.records.get(key).ram[0], 1);
+  const fresh = harness(h.store);
+  await load(fresh, "renamed.gb", rom);
+  await fresh.element("#load-state").fire("click");
+  assert.equal(fresh.evaluate("emulator.cpu.pc"), pc);
+  assert.equal(fresh.evaluate("emulator.dot"), dot);
+  assert.equal(fresh.evaluate("emulator.read(0xc123)"), 0x77);
+  assert.equal(fresh.evaluate("paused"), true);
+  assert.equal(fresh.evaluate("stateMode"), true);
+  fresh.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(9))");
+  await fresh.intervals[0]();
+  assert.equal(h.store.records.get(key).ram[0], 1);
+  await fresh.element("#reset-button").fire("click");
+  assert.equal(fresh.evaluate("emulator.cartridge.ram[0]"), 1);
+  assert.equal(fresh.evaluate("stateMode"), false);
+});
+
+test("local RAM reload waits for an in-flight commit and restores the committed bytes", async () => {
+  const h = harness(), rom = makeROM({ type: 3, ramSize: 2 });
+  await load(h, "game.gb", rom);
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(1))");
+  await h.evaluate("saveCurrent()");
+  const write = h.store.write, read = h.store.read;
+  let releaseWrite, signalWrite, signalRead;
+  const blocked = new Promise(resolve => { releaseWrite = resolve; });
+  const writing = new Promise(resolve => { signalWrite = resolve; });
+  const reading = new Promise(resolve => { signalRead = resolve; });
+  h.store.write = async (...args) => { signalWrite(); await blocked; return write(...args); };
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(2))");
+  const commit = h.evaluate("saveCurrent()");
+  await writing;
+  h.store.read = async (...args) => { const data = await read(...args); signalRead(); return data; };
+  const reload = h.element("#reload-save").fire("click");
+  await reading;
+  releaseWrite();
+  await Promise.all([commit, reload]);
+  assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 2);
+  assert.equal(h.evaluate("saveSession.committedData.ram[0]"), 2);
+  const key = await h.store.keyFor(rom);
+  assert.equal(h.store.records.get(key).ram[0], 2);
+  assert.equal(h.evaluate("paused"), true);
+});
+
+test("state RAM replaces SAV only after explicit confirmation, with recovery preserved", async () => {
+  const h = harness(), rom = makeROM({ type: 3, ramSize: 2, program: [0x18, 0xfe] });
+  await load(h, "game.gb", rom);
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(1))");
+  await h.evaluate("saveCurrent(true)");
+  h.evaluate("emulator.cartridge.importRAM(new Uint8Array(8192).fill(2))");
+  await h.element("#save-state").fire("click");
+  await h.element("#load-state").fire("click");
+  const key = await h.store.keyFor(rom);
+  h.window.confirm = () => false;
+  await h.element("#save-button").fire("click");
+  assert.equal(h.store.records.get(key).ram[0], 1);
+  h.window.confirm = () => true;
+  await h.element("#save-button").fire("click");
+  assert.equal(h.store.records.get(key).ram[0], 2);
+  assert.equal(h.store.records.get(`backup:${key}`).ram[0], 1);
+  assert.equal(h.evaluate("stateMode"), false);
+});
+
+test("state export/import works without cartridge RAM and invalid files keep the live machine", async () => {
+  const h = harness(), rom = makeDemoROM(true);
+  await load(h, "game.gbc", rom);
+  h.evaluate("emulator.runCycles(10000)");
+  await h.element("#export-state").fire("click");
+  assert.equal(h.created.at(-1).download, "game.state");
+  const blob = h.downloads.at(-1), old = h.evaluate("emulator");
+  h.element("#state-file").files = [{ name: "game.state", size: blob.size, text: () => blob.text() }];
+  await h.element("#state-file").fire("change");
+  assert.notEqual(h.evaluate("emulator"), old);
+  assert.equal(h.evaluate("stateMode"), true);
+  assert.equal(h.evaluate("saveSession"), null);
+  const active = h.evaluate("emulator");
+  const invalid = new Blob(["{}"]);
+  h.element("#state-file").files = [{ name: "bad.state", size: invalid.size, text: () => invalid.text() }];
+  await h.element("#state-file").fire("change");
+  assert.equal(h.evaluate("emulator"), active);
+  assert.match(h.element("#state-status").textContent, /incompatible/);
+});
+
+test("a synthetic game sees the imported in-game save in the correct SRAM bank at boot", async () => {
+  const program = [
+    0x3e, 10, 0xea, 0, 0, 0x3e, 2, 0xea, 0, 0x40,
+    0xfa, 0, 0xa0, 0xfe, 0x77, 0xc2, 0, 0,
+    0x3e, 1, 0xea, 0, 0xc0, 0x18, 0xfe,
+  ];
+  const failureAddress = 0x150 + program.length;
+  program[16] = failureAddress & 255; program[17] = failureAddress >> 8;
+  program.push(0xaf, 0xea, 0, 0xc0, 0x18, 0xfe);
+  const rom = makeROM({ color: true, type: 0x10, ramSize: 3, program });
+  const h = harness();
+  await load(h, "game.gbc", rom);
+  const ram = new Uint8Array(32768); ram[2 * 8192] = 0x77;
+  h.element("#save-file").files = [file("game.sav", ram)];
+  await h.element("#save-file").fire("change");
+  assert.equal(h.evaluate("paused"), true);
+  assert.equal(h.evaluate("emulator.cpu.pc"), 0x100);
+  await h.element("#pause-button").fire("click");
+  h.evaluate("advance(0); advance(17)");
+  assert.equal(h.evaluate("emulator.wram[0]"), 1);
+  const fresh = harness(h.store);
+  await load(fresh, "same.gbc", rom);
+  fresh.evaluate("advance(0); advance(17)");
+  assert.equal(fresh.evaluate("emulator.wram[0]"), 1);
+  const key = await h.store.keyFor(rom);
+  assert.equal(h.store.records.get(key).ram[2 * 8192], 0x77);
 });

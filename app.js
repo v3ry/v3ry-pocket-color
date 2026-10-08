@@ -21,6 +21,14 @@ const importButton = document.querySelector("#import-save");
 const saveInput = document.querySelector("#save-file");
 const saveStatus = document.querySelector("#save-status");
 const saveStore = new PocketSaves.SaveStore();
+const reloadSaveButton = document.querySelector("#reload-save");
+const recoverSaveButton = document.querySelector("#recover-save");
+const saveStateButton = document.querySelector("#save-state");
+const loadStateButton = document.querySelector("#load-state");
+const exportStateButton = document.querySelector("#export-state");
+const importStateButton = document.querySelector("#import-state");
+const stateInput = document.querySelector("#state-file");
+const stateStatus = document.querySelector("#state-status");
 const clock = 4194304;
 const keys = new Map([
   ["ArrowRight", 0], ["ArrowLeft", 1], ["ArrowUp", 2], ["ArrowDown", 3],
@@ -43,6 +51,8 @@ let saveSession = null;
 let gameTransition = Promise.resolve();
 let transitioning = false;
 let importing = false;
+let gameKey = null;
+let stateMode = false;
 const audioSources = new Set();
 const heldKeys = new Set();
 const heldPointers = new Map();
@@ -57,20 +67,34 @@ function setSaveStatus(message, isError = false) {
   saveStatus.classList.toggle("is-error", isError);
 }
 
+function setStateStatus(message, isError = false) {
+  stateStatus.textContent = message;
+  stateStatus.classList.toggle("is-error", isError);
+}
+
 function updateSaveButtons() {
   const busy = transitioning || importing;
   saveButton.disabled = busy || !saveSession;
   exportButton.disabled = importButton.disabled = busy || !emulator?.cartridge.ram.length;
+  reloadSaveButton.disabled = recoverSaveButton.disabled = busy || !saveSession;
+  for (const button of [saveStateButton, loadStateButton, exportStateButton, importStateButton]) {
+    button.disabled = busy || !emulator || !gameKey;
+  }
 }
 
 async function saveCurrent(notify = false) {
   const session = saveSession;
   if (!session || transitioning || importing) return;
+  if (stateMode) {
+    if (notify === true) setSaveStatus("État chargé : sauvegarde in-game protégée. Exportez un .sav ou redémarrez pour retrouver la sauvegarde in-game.");
+    return;
+  }
   try {
     const written = await session.flush();
-    if (session === saveSession && (written || notify === true)) {
+    if (session === saveSession && ((written && session.lastWriteKind === "ram") || notify === true)) {
       setSaveStatus(session.dirty ? "Sauvegarde enregistrée ; dernières modifications en attente."
-        : written ? "Sauvegarde locale enregistrée." : "Aucune nouvelle modification à enregistrer.");
+        : written && session.lastWriteKind === "ram" ? "RAM in-game enregistrée localement (cela ne valide pas la sauvegarde dans le jeu)."
+          : "RAM in-game à jour ; horloge conservée.");
     }
   } catch (error) {
     if (session === saveSession) setSaveStatus(`Sauvegarde impossible : ${error.message} Exportez un .sav pour conserver la RAM.`, true);
@@ -157,17 +181,20 @@ function startGame(bytes, name, version = loadVersion) {
     pauseButton.disabled = true;
     let committed = false;
     try {
-      if (saveSession) await saveSession.flush();
+      if (saveSession && !stateMode) await saveSession.flush();
       if (version !== loadVersion) return;
       let session = null, restored = false;
+      const key = await saveStore.keyFor(bytes);
       if (candidate.cartridge.ram.length || candidate.cartridge.hasRTC) {
         setSaveStatus("Lecture de la sauvegarde locale…");
-        session = new PocketSaves.SaveSession(saveStore, await saveStore.keyFor(bytes), candidate.cartridge);
+        session = new PocketSaves.SaveSession(saveStore, key, candidate.cartridge);
         restored = await session.restore();
       }
       if (version !== loadVersion) return;
       emulator = candidate;
       saveSession = session;
+      gameKey = key;
+      stateMode = false;
       loadedBytes = bytes;
       loadedName = name;
       paused = false;
@@ -180,8 +207,10 @@ function startGame(bytes, name, version = loadVersion) {
       pauseButton.textContent = "Pause";
       draw();
       setStatus(`${name} — cœur maison actif. Compatibilité expérimentale.`);
-      setSaveStatus(session ? restored ? "Sauvegarde locale restaurée." : "Sauvegarde automatique activée (toutes les secondes)."
+      setSaveStatus(session ? restored ? "RAM in-game restaurée avant le démarrage. Choisissez Continuer dans le jeu."
+        : "Aucune sauvegarde in-game locale. Enregistrement automatique de la RAM activé."
         : "Cette cartouche n’a pas de RAM de sauvegarde ni d’horloge.");
+      setStateStatus("État indépendant : sauvegardez un instant, puis chargez-le avec Charger l’état.");
       committed = true;
       animation = requestAnimationFrame(run);
     } catch (error) {
@@ -282,20 +311,36 @@ resetButton.addEventListener("click", async () => {
   }
 });
 
-saveButton.addEventListener("click", () => saveCurrent(true));
+saveButton.addEventListener("click", async () => {
+  if (!stateMode) return saveCurrent(true);
+  if (!saveSession || transitioning || importing) return;
+  if (!window.confirm("Utiliser la RAM de cet état comme sauvegarde in-game remplacera votre .sav locale. Continuer ?")) return;
+  importing = true;
+  stopLoop();
+  updateSaveButtons();
+  try {
+    const previous = await saveStore.read(gameKey);
+    saveSession.committedData = previous || emulator.cartridge.saveData();
+    saveSession.recoveryData = previous;
+    saveSession.savedRevision = -1;
+    await saveSession.flush();
+    stateMode = false;
+    setSaveStatus("RAM de l’état enregistrée comme sauvegarde in-game. Enregistrement automatique réactivé.");
+  } catch (error) {
+    setSaveStatus(`Enregistrement de la RAM d’état impossible : ${error.message}`, true);
+    console.error(error);
+  } finally {
+    importing = false;
+    updateSaveButtons();
+    if (!paused && !document.hidden) animation = requestAnimationFrame(run);
+  }
+});
 exportButton.addEventListener("click", () => {
   if (!emulator?.cartridge.ram.length || transitioning || importing) return;
   try {
     const bytes = emulator.cartridge.exportRAM();
     const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc)$/i, "") + ".sav";
-    const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = name;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadFile(new Blob([bytes], { type: "application/octet-stream" }), name);
     setSaveStatus("Export .sav lancé : RAM uniquement, sans l’horloge RTC.");
   } catch (error) {
     setSaveStatus(`Export impossible : ${error.message}`, true);
@@ -328,20 +373,22 @@ saveInput.addEventListener("change", async () => {
     candidate.cartridge.restoreData(target.cartridge.saveData());
     candidate.cartridge.importRAM(bytes);
     if (session) {
-      await session.flush();
+      if (!stateMode) await session.flush();
       const importedSession = new PocketSaves.SaveSession(saveStore, session.key, candidate.cartridge);
+      importedSession.recoveryData = await saveStore.read(session.key);
+      if (importedSession.recoveryData) importedSession.committedData = importedSession.recoveryData;
       importedSession.savedRevision = -1;
       await importedSession.flush();
       saveSession = importedSession;
     }
     emulator = candidate;
-    paused = false;
+    stateMode = false;
+    paused = true;
     pauseButton.disabled = false;
-    pauseButton.textContent = "Pause";
-    screenCaption.textContent = emulator.color ? "GAME BOY COLOR" : "GAME BOY";
+    pauseButton.textContent = "Reprendre";
+    screenCaption.textContent = "PAUSE";
     draw();
-    animation = requestAnimationFrame(run);
-    setSaveStatus("Sauvegarde .sav importée et enregistrée. Horloge RTC locale conservée.");
+    setSaveStatus("RAM .sav importée et enregistrée. Démarrage en pause : cliquez sur Reprendre, puis Continuer dans le jeu. Horloge locale conservée.");
   } catch (error) {
     setSaveStatus(`Import impossible : ${error.message} La sauvegarde précédente est conservée.`, true);
     console.error(error);
@@ -357,10 +404,158 @@ saveInput.addEventListener("change", async () => {
 window.setInterval(saveCurrent, 1000);
 window.addEventListener("pagehide", saveCurrent);
 window.addEventListener("beforeunload", (event) => {
-  if (saveSession?.dirty || importing || transitioning) {
+  if ((!stateMode && saveSession?.dirty) || importing || transitioning) {
     saveCurrent();
     event.preventDefault();
     event.returnValue = "";
+  }
+});
+
+function downloadFile(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function activateRestored(candidate, session, fromState) {
+  stopLoop();
+  emulator = candidate;
+  saveSession = session;
+  stateMode = fromState;
+  paused = true;
+  pauseButton.disabled = false;
+  pauseButton.textContent = "Reprendre";
+  screenCaption.textContent = "PAUSE";
+  draw();
+  updateSaveButtons();
+}
+
+async function restoreLocalRAM(recovery = false) {
+  if (!emulator || !saveSession || transitioning || importing) return;
+  const target = emulator, key = gameKey, version = loadVersion;
+  try {
+    const data = await saveStore.read(recovery ? `backup:${key}` : key);
+    if (!data) throw new Error(recovery ? "Aucune copie de récupération disponible." : "Aucune sauvegarde in-game locale.");
+    if (target !== emulator || version !== loadVersion || transitioning || importing) {
+      throw new Error("Le jeu a changé pendant la lecture. Réessayez.");
+    }
+    const candidate = new PocketGameBoy(loadedBytes, audioContext?.sampleRate || 48000);
+    candidate.cartridge.restoreData(data);
+    if (!window.confirm("Recharger cette RAM redémarrera le jeu sans enregistrer les modifications actuelles. Continuer ?")) return;
+    importing = true;
+    loadVersion++;
+    stopLoop();
+    updateSaveButtons();
+    await saveSession.pending.then(() => {}, error => {
+      setSaveStatus(`Dernier commit non enregistré : ${error.message}. Restauration de la copie locale.`, true);
+      console.error(error);
+    });
+    if (!recovery) {
+      const latest = await saveStore.read(key);
+      if (!latest) throw new Error("La sauvegarde locale n’est plus disponible.");
+      candidate.cartridge.restoreData(latest);
+    }
+    const session = new PocketSaves.SaveSession(saveStore, key, candidate.cartridge);
+    if (recovery) {
+      session.recoveryData = await saveStore.read(key);
+      if (session.recoveryData) session.committedData = session.recoveryData;
+      session.savedRevision = -1;
+      await session.flush();
+    } else {
+      session.recoveryData = candidate.cartridge.saveData();
+    }
+    activateRestored(candidate, session, false);
+    setSaveStatus("RAM in-game rechargée, jeu en pause. Cliquez sur Reprendre, puis Continuer dans le jeu.");
+  } catch (error) {
+    setSaveStatus(`Restauration impossible : ${error.message}`, true);
+    console.error(error);
+    if (importing && emulator && !paused && !document.hidden) animation = requestAnimationFrame(run);
+  } finally {
+    importing = false;
+    updateSaveButtons();
+  }
+}
+reloadSaveButton.addEventListener("click", () => restoreLocalRAM(false));
+recoverSaveButton.addEventListener("click", () => restoreLocalRAM(true));
+
+saveStateButton.addEventListener("click", async () => {
+  if (!emulator || transitioning || importing) return;
+  const target = emulator, key = gameKey;
+  try {
+    const data = PocketStates.capture(target, key);
+    await saveStore.write(`state:${key}`, data);
+    if (target === emulator) setStateStatus(`État enregistré à ${new Date(data.createdAt).toLocaleTimeString()}. La sauvegarde in-game est inchangée.`);
+  } catch (error) {
+    setStateStatus(`Enregistrement d’état impossible : ${error.message}`, true);
+    console.error(error);
+  }
+});
+
+async function restoreState(data, target, key, version) {
+  if (target !== emulator || key !== gameKey || version !== loadVersion || transitioning || importing) {
+    throw new Error("Le jeu a changé pendant la lecture de l’état. Réessayez.");
+  }
+  const candidate = new PocketGameBoy(loadedBytes, audioContext?.sampleRate || 48000);
+  PocketStates.restore(candidate, data, key);
+  if (!window.confirm("Charger cet état remplace la partie en cours. La sauvegarde in-game locale restera inchangée. Continuer ?")) return;
+  importing = true;
+  loadVersion++;
+  updateSaveButtons();
+  stopLoop();
+  try {
+    if (saveSession) await saveSession.pending;
+    const session = candidate.cartridge.ram.length || candidate.cartridge.hasRTC
+      ? new PocketSaves.SaveSession(saveStore, key, candidate.cartridge) : null;
+    activateRestored(candidate, session, true);
+    setStateStatus("État chargé, jeu en pause. Cliquez sur Reprendre pour continuer à cet instant.");
+    setSaveStatus("Mode état : enregistrement automatique in-game suspendu pour protéger votre .sav. Export .sav possible ; Redémarrer retrouve la sauvegarde in-game.");
+  } finally {
+    importing = false;
+    updateSaveButtons();
+    if (!paused && !document.hidden) animation = requestAnimationFrame(run);
+  }
+}
+loadStateButton.addEventListener("click", async () => {
+  if (!emulator || transitioning || importing) return;
+  const target = emulator, key = gameKey, version = loadVersion;
+  try {
+    const data = await saveStore.read(`state:${key}`);
+    if (!data) throw new Error("Aucun état local pour cette ROM. Utilisez Sauvegarder l’état ou Importer un état.");
+    await restoreState(data, target, key, version);
+  } catch (error) {
+    setStateStatus(`Chargement d’état impossible : ${error.message}`, true);
+    console.error(error);
+  }
+});
+exportStateButton.addEventListener("click", () => {
+  if (!emulator || transitioning || importing) return;
+  try {
+    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc)$/i, "") + ".state";
+    downloadFile(PocketStates.encode(PocketStates.capture(emulator, gameKey)), name);
+    setStateStatus("Export .state lancé : instant complet, réservé à cet émulateur et à cette ROM.");
+  } catch (error) {
+    setStateStatus(`Export d’état impossible : ${error.message}`, true);
+    console.error(error);
+  }
+});
+importStateButton.addEventListener("click", () => stateInput.click());
+stateInput.addEventListener("change", async () => {
+  const file = stateInput.files[0];
+  stateInput.value = "";
+  if (!file || !emulator || transitioning || importing) return;
+  const target = emulator, key = gameKey, version = loadVersion;
+  try {
+    if (!/\.state$/i.test(file.name)) throw new Error("Choisissez un fichier .state de v3ry Pocket Color, pas un .sav.");
+    const data = await PocketStates.decode(file);
+    await restoreState(data, target, key, version);
+  } catch (error) {
+    setStateStatus(`Import d’état impossible : ${error.message}`, true);
+    console.error(error);
   }
 });
 soundButton.addEventListener("click", async () => {

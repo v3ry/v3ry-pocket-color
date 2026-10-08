@@ -20,6 +20,35 @@ test("missing storage and crypto fail explicitly", async () => {
   await assert.rejects(new SaveStore(null, null).keyFor(new Uint8Array()), /Identification/);
 });
 
+test("main RAM and recovery share one transaction and resolve only after commit", async () => {
+  const store = new SaveStore(null, null), writes = [];
+  let transaction, count = 0;
+  store.database = {
+    transaction(name, mode) {
+      count++;
+      assert.equal(name, "games");
+      assert.equal(mode, "readwrite");
+      transaction = { objectStore: () => ({ put: (data, key) => writes.push({ data, key }) }) };
+      return transaction;
+    },
+  };
+  const main = { ram: new Uint8Array([2]) }, backup = { ram: new Uint8Array([1]) };
+  let resolved = false;
+  const commit = store.writeGame("key", main, backup).then(() => { resolved = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(count, 1);
+  assert.deepEqual(writes, [{ data: main, key: "key" }, { data: backup, key: "backup:key" }]);
+  assert.equal(resolved, false);
+  transaction.oncomplete();
+  await commit;
+  assert.equal(resolved, true);
+  const failed = store.writeGame("key", main, backup);
+  await new Promise(resolve => setImmediate(resolve));
+  transaction.error = new Error("Quota exceeded");
+  transaction.onabort();
+  await assert.rejects(failed, /Quota exceeded/);
+});
+
 test("SAV import/export copies RAM, validates before mutation and masks MBC2 nibbles", () => {
   for (const type of [3, 6, 0x10, 0x1b]) {
     const cart = new Cartridge(makeROM({ type, ramSize: 3 }));
@@ -128,4 +157,35 @@ test("IndexedDB put resolves on transaction completion, not request success; abo
   await new Promise(resolve => setImmediate(resolve));
   transaction.error = new Error("Quota"); transaction.onabort();
   await assert.rejects(failed, /Quota/);
+});
+
+test("RTC-only flushes are classified separately and preserve the RAM snapshot", async () => {
+  const store = memorySaveStore(), cart = new Cartridge(makeROM({ type: 0x10, ramSize: 3 }));
+  const session = new SaveSession(store, "rtc", cart);
+  await session.restore();
+  cart.lastRTC -= 2100;
+  assert.equal(await session.flush(), true);
+  assert.equal(session.lastWriteKind, "rtc");
+  assert.ok(store.records.get("rtc").ram.every(byte => byte === 0));
+  cart.importRAM(new Uint8Array(32768).fill(7));
+  await session.flush();
+  assert.equal(session.lastWriteKind, "ram");
+});
+
+test("the restored RAM is retained once per session before writes, not rotated by RTC or repeated RAM writes", async () => {
+  const store = memorySaveStore(), rom = makeROM({ type: 0x10, ramSize: 3 });
+  const cart = new Cartridge(rom);
+  cart.importRAM(new Uint8Array(32768).fill(0x55));
+  await store.write("game", cart.saveData());
+  const session = new SaveSession(store, "game", new Cartridge(rom));
+  await session.restore();
+  session.cartridge.lastRTC -= 2100; await session.flush();
+  assert.equal(store.records.has("backup:game"), false);
+  session.cartridge.importRAM(new Uint8Array(32768).fill(0));
+  await session.flush();
+  assert.equal(store.records.get("backup:game").ram[0], 0x55);
+  session.cartridge.importRAM(new Uint8Array(32768).fill(0x33));
+  await session.flush();
+  assert.equal(store.records.get("backup:game").ram[0], 0x55);
+  assert.equal(store.records.get("game").ram[0], 0x33);
 });

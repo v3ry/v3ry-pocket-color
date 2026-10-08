@@ -6,6 +6,7 @@ node_modules/
 *.gbc
 *.zip
 *.sav
+*.state
 *.bin
 *.pem
 *.key

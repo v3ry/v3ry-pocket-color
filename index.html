@@ -13,6 +13,7 @@
     <script src="emulator.js" defer></script>
     <script src="zip.js" defer></script>
     <script src="saves.js" defer></script>
+    <script src="states.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -92,13 +93,25 @@
           <button id="reset-button" type="button" disabled>Redémarrer</button>
           <button id="sound-button" type="button" aria-pressed="false">Activer le son</button>
         </div>
-        <div class="player-actions" aria-label="Sauvegardes du jeu">
-          <button id="save-button" type="button" disabled>Sauvegarder maintenant</button>
+        <h3 class="save-heading">Sauvegarde in-game · mémoire de cartouche</h3>
+        <div class="player-actions" aria-label="Sauvegardes in-game">
+          <button id="save-button" type="button" disabled>Enregistrer la RAM</button>
+          <button id="reload-save" type="button" disabled>Recharger la RAM locale</button>
+          <button id="recover-save" type="button" disabled>Récupérer la RAM précédente</button>
           <button id="export-save" type="button" disabled>Exporter .sav</button>
           <button id="import-save" type="button" disabled>Importer .sav</button>
           <input id="save-file" type="file" accept=".sav" hidden>
         </div>
         <p class="status-message" id="save-status" role="status" aria-live="polite">Les sauvegardes restent dans ce navigateur.</p>
+        <h3 class="save-heading">Sauvegarde d’état · reprendre au même instant</h3>
+        <div class="player-actions" aria-label="Sauvegardes d’état">
+          <button id="save-state" type="button" disabled>Sauvegarder l’état</button>
+          <button id="load-state" type="button" disabled>Charger l’état</button>
+          <button id="export-state" type="button" disabled>Exporter .state</button>
+          <button id="import-state" type="button" disabled>Importer .state</button>
+          <input id="state-file" type="file" accept=".state" hidden>
+        </div>
+        <p class="status-message" id="state-status" role="status" aria-live="polite">Les états sont indépendants des fichiers .sav.</p>
         <div class="touch-controls" aria-label="Commandes de jeu">
           <div class="direction-pad">
             <button data-key="2" class="pad-up" type="button" aria-label="Haut">↑</button>
@@ -123,7 +136,8 @@
           <h2>Prêt à jouer ?</h2>
           <p>Clavier : flèches pour se déplacer. Boutons A/B : touches A/Z sur AZERTY, Q/W sur QWERTY. Entrée pour Start et Maj pour Select. Cliquez sur l’écran pour lui donner le focus. Des boutons tactiles sont aussi disponibles.</p>
           <p>ZIP : compression standard ou fichiers non compressés. Si plusieurs ROM sont présentes, choisissez le jeu à lancer. Le cœur maison est expérimental : certains jeux peuvent présenter des défauts.</p>
-          <p>Sauvegardez depuis le menu du jeu : sa RAM est enregistrée automatiquement dans ce navigateur. Exportez un .sav pour garder une copie ; ce fichier n’inclut pas l’horloge RTC. Ce ne sont pas des sauvegardes d’état.</p>
+          <p>In-game : sauvegardez depuis le menu du jeu, puis choisissez Continuer au prochain lancement. L’enregistrement de la RAM ne garantit pas que le jeu y a écrit une sauvegarde valide. Les .sav contiennent la RAM, sans l’horloge.</p>
+          <p>État : Sauvegarder l’état mémorise l’instant complet ; Charger l’état reprend à cet instant, en pause. Un état chargé ne remplace pas votre sauvegarde in-game : son enregistrement automatique est suspendu. Redémarrer retrouve la RAM in-game locale.</p>
           <p class="legal-note">Utilisez uniquement des jeux que vous êtes autorisé à utiliser. Aucune ROM n’est fournie avec ce site.</p>
         </div>
       </aside>

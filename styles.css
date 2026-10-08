@@ -255,6 +255,12 @@ h1 span {
   color: #a23d32;
 }
 
+.save-heading {
+  margin: 16px 0 8px;
+  color: var(--dark-green);
+  font-size: 12px;
+}
+
 .player-column {
   min-width: 0;
 }

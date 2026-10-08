@@ -48,6 +48,17 @@
     }
     read(key) { return this.transaction(key, undefined, false); }
     write(key, data) { return this.transaction(key, data, true); }
+    async writeGame(key, data, recovery) {
+      const database = await this.open();
+      return new Promise((resolve, reject) => {
+        const transaction = database.transaction("games", "readwrite");
+        const store = transaction.objectStore("games");
+        store.put(data, key);
+        if (recovery !== undefined) store.put(recovery, `backup:${key}`);
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = () => reject(transaction.error || new Error("Enregistrement RAM annule."));
+      });
+    }
   }
 
   class SaveSession {
@@ -57,10 +68,15 @@
       this.cartridge = cartridge;
       this.savedRevision = cartridge.saveRevision;
       this.pending = Promise.resolve();
+      this.committedData = cartridge.saveData();
+      this.recoverySaved = false;
+      this.lastWriteKind = null;
     }
     async restore() {
       const data = await this.store.read(this.key);
       if (data !== undefined) this.cartridge.restoreData(data);
+      this.committedData = this.cartridge.saveData();
+      this.recoveryData = data;
       this.savedRevision = this.cartridge.saveRevision;
       return data !== undefined;
     }
@@ -69,7 +85,12 @@
         if (this.cartridge.hasRTC) this.cartridge.updateRTC();
         if (this.savedRevision === this.cartridge.saveRevision) return false;
         const data = this.cartridge.saveData(), revision = this.cartridge.saveRevision;
-        await this.store.write(this.key, data);
+        const ramChanged = !data.ram.every((byte, index) => byte === this.committedData.ram[index]);
+        const recovery = ramChanged && !this.recoverySaved ? this.recoveryData : undefined;
+        await this.store.writeGame(this.key, data, recovery);
+        if (recovery !== undefined) this.recoverySaved = true;
+        this.committedData = data;
+        this.lastWriteKind = ramChanged ? "ram" : "rtc";
         this.savedRevision = revision;
         return true;
       };
