@@ -20,7 +20,7 @@ function worker() {
     self: { registration: { scope }, clients: { async claim() {} }, addEventListener: (name, callback) => { events[name] = callback; } },
     caches: {
       async open() { return cache; },
-      async keys() { return ["unrelated-cache", ...Array.from({ length: 20 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`)]; },
+      async keys() { return ["unrelated-cache", ...Array.from({ length: 21 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`)]; },
       async delete(name) { deleted.push(name); },
     },
     async fetch(request) { network.push(request.url); return { network: true }; },
@@ -44,7 +44,7 @@ test("service worker precaches only existing application assets and serves offli
   assert.equal((await w.request(w.scope + "app.js?version=1")).cached, true);
   assert.equal(w.network.length, 0);
   await w.lifecycle("activate");
-  assert.deepEqual(w.deleted, Array.from({ length: 19 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
+  assert.deepEqual(w.deleted, Array.from({ length: 20 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
 });
 
 test("service worker never intercepts ROM, ZIP, saves, cross-origin or write requests", async () => {

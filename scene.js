@@ -375,7 +375,8 @@
       const error = gl.getError();
       if (error !== gl.NO_ERROR) throw new Error(`Erreur WebGL : ${error}.`);
       return { tiles: scene.tiles, smoothed: smoothing && !(scene.terrain && !scene.terrain.active), detail: world?.active ? world.detail
-        : world ? scene.terrain && !scene.terrain.active ? `3D : ${scene.terrain.reason}` : world.reason
+        : world?.battle ? `3D : ${world.reason}`
+          : world ? scene.terrain && !scene.terrain.active ? `3D : ${scene.terrain.reason}` : world.reason
           : scene.terrain?.reason };
     }
     dispose() {

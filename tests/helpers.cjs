@@ -4,6 +4,7 @@ const { deflateRawSync } = require("node:zlib");
 const { crc32 } = require("../zip.js");
 const { SaveStore } = require("../saves.js");
 const { webcrypto } = require("node:crypto");
+const { GameBoy } = require("../emulator.js");
 
 function makeROM({ color = false, type = 0, sizeCode = 0, ramSize = 0, program = [] } = {}) {
   const rom = new Uint8Array((2 << sizeCode) * 0x4000);
@@ -39,6 +40,46 @@ function makeDemoROM(color = true) {
   const rom = makeROM({ color, program });
   rom[0x40] = 0xd9;
   return rom;
+}
+
+function makeRedBattle({ type = 2, fullWindow = true, moveInfo = false } = {}) {
+  const game = new GameBoy(makeROM({ type: 0x1b, sizeCode: 5, ramSize: 3 }));
+  game.cartridge.title = "POKEMON RED";
+  game.cartridge.rom[0x14e] = 0x7a; game.cartridge.rom[0x14f] = 0xfc;
+  game.wram[0x105c] = type;
+  game.io[0x40] = fullWindow ? 0xe3 : 0x83;
+  game.io[0x43] = fullWindow ? 2 : 0;
+  game.io[0x4a] = 0; game.io[0x4b] = 7; game.io[0x47] = 0xe4;
+  game.vram.fill(0x7f, 0x1800, 0x2000);
+  const base = fullWindow ? 0x1c00 : 0x1800;
+  for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
+    game.vram[base + y * 32 + 12 + x] = x * 7 + y;
+    game.vram[base + (5 + y) * 32 + 1 + x] = 49 + x * 7 + y;
+  }
+  for (let y = 12; y < 18; y++) for (let x = 0; x < 20; x++) {
+    game.vram[base + y * 32 + x] = y === 12 || y === 17 ? 122 : x === 0 || x === 19 ? 124 : 127;
+  }
+  for (const [x, y, tile] of [[0, 12, 121], [19, 12, 123], [0, 17, 125], [19, 17, 126],
+    [1, 3, 116], [10, 3, 120], [9, 11, 111], [18, 11, 119], [1, 0, 128], [10, 7, 129]]) {
+    game.vram[base + y * 32 + x] = tile;
+  }
+  if (moveInfo) {
+    for (let y = 8; y <= 12; y++) for (let x = 0; x <= 10; x++) {
+      game.vram[base + y * 32 + x] = y === 8 || y === 12 ? 122 : x === 0 || x === 10 ? 124 : 127;
+    }
+    for (const [x, y, tile] of [[0, 8, 121], [10, 8, 123], [0, 12, 125], [10, 12, 126], [1, 9, 128]]) {
+      game.vram[base + y * 32 + x] = tile;
+    }
+  }
+  for (let tile = 0; tile < 98; tile++) for (let y = 1; y < 7; y++) {
+    game.vram[0x1000 + tile * 16 + y * 2] = y === 1 || y === 6 ? 0x7e : 0x42;
+  }
+  for (let tile = 98; tile <= 129; tile++) {
+    if (tile !== 127) game.vram.fill(0xaa, 0x1000 + (tile < 128 ? tile : tile - 256) * 16,
+      0x1000 + (tile < 128 ? tile : tile - 256) * 16 + 16);
+  }
+  game.setVideoCapture(true); game.tick(70224);
+  return game;
 }
 
 function makeZIP(files, { method = 0, descriptor = false, comment = "" } = {}) {
@@ -94,4 +135,4 @@ function memorySaveStore() {
   return store;
 }
 
-module.exports = { makeROM, makeDemoROM, makeZIP, memorySaveStore };
+module.exports = { makeROM, makeDemoROM, makeRedBattle, makeZIP, memorySaveStore };

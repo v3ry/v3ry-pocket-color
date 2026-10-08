@@ -26,11 +26,124 @@
     monochromeAtlas.pixels.set([30 + light * 185, 55 + light * 178, 40 + light * 135], i);
   }
   const geometryCache = new WeakMap();
+  const battleCache = new WeakMap();
+
+  function quad(output, points, uv, shade = 1) {
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      const [x, y, z] = points[i];
+      output.push(x - 80, 72 - y, z, ...uv[i], shade);
+    }
+  }
+  function buildBattle(game, world, thickness) {
+    const textures = Graphics.scene(game);
+    if (world.screenMap) Graphics.mapWindow(game, textures);
+    const overlay = world.overlay.slice();
+    for (let i = 0; i < overlay.length; i++) if (textures.sprites.pixels[i * 4 + 3]) overlay[i] = 1;
+    Graphics.overlay(game, textures, new Uint8Array(160 * 144).fill(1));
+    const frame = textures.window.pixels;
+    const pictures = { width: 160, height: 144, pixels: frame.slice() };
+    const hud = { width: 160, height: 144, pixels: frame.slice() };
+    const cached = battleCache.get(game), key = JSON.stringify([thickness, world.combatants]);
+    const reusable = cached?.key === key && world.pictures.every((value, i) => value === cached.pictures[i]);
+    const palette = game.io[0x47];
+    let material = cached?.palette === palette ? cached.material : null;
+    if (!material) {
+      material = { width: 4, height: 1, pixels: new Uint8ClampedArray(16) };
+      const view = Object.create(game);
+      view.pixels = new Uint8ClampedArray(4); view.ly = 0;
+      for (let color = 0; color < 4; color++) {
+        view.paint(0, color, 0);
+        material.pixels.set(view.pixels, color * 4);
+      }
+    }
+    for (let i = 0; i < overlay.length; i++) {
+      if (world.pictureColors?.[i] >= 0) {
+        const offset = world.pictureColors[i] * 4;
+        pictures.pixels.set(material.pixels.subarray(offset, offset + 4), i * 4);
+      }
+      if (!world.pictures[i]) pictures.pixels[i * 4 + 3] = 0;
+      if (!overlay[i]) hud.pixels[i * 4 + 3] = 0;
+    }
+    let geometry = cached;
+    if (!reusable) {
+      const background = [], models = [], sprites = [], shadows = [];
+      const base = thickness * 0.28, depth = thickness * 0.45;
+      const uv = slot => Array.from({ length: 4 }, () => [(slot + 0.5) / 4, 0.5]);
+      quad(background, [[-80, -80, -1], [240, -80, -1], [240, 240, -1], [-80, 240, -1]], uv(0));
+      function ellipse(output, x, y, rx, ry, z, slot, shade = 1) {
+        for (let i = 0; i < 32; i++) {
+          const a = i * Math.PI / 16, b = (i + 1) * Math.PI / 16;
+          quad(output, [[x, y, z], [x + Math.cos(a) * rx, y + Math.sin(a) * ry, z],
+            [x + Math.cos(b) * rx, y + Math.sin(b) * ry, z], [x, y, z]], uv(slot), shade);
+        }
+      }
+      const visible = [];
+      for (const combatant of world.combatants) {
+        const { id, x: cx, y: cy, sourceX, sourceBottom, size } = combatant;
+        const rx = id === 1 ? 29 : 35, ry = id === 1 ? 15 : 18;
+        for (let i = 0; i < 32; i++) {
+          const a = i * Math.PI / 16, b = (i + 1) * Math.PI / 16;
+          const x0 = cx + Math.cos(a) * rx, y0 = cy + Math.sin(a) * ry;
+          const x1 = cx + Math.cos(b) * rx, y1 = cy + Math.sin(b) * ry;
+          quad(models, [[x0, y0, 0], [x1, y1, 0], [x1, y1, base], [x0, y0, base]],
+            uv(1), 0.65 + Math.sin(a) * 0.15);
+        }
+        ellipse(models, cx, cy, rx, ry, base, 1, 0.9);
+        ellipse(models, cx, cy, rx - 2, ry - 2, base + 0.04, 0);
+        if (!world.pictures.includes(id)) continue;
+        visible.push(id);
+        ellipse(shadows, cx, cy + 2, rx * 0.6, ry * 0.45, base + 0.08, 2, 0.85);
+        const front = cy + depth / 2, back = cy - depth / 2;
+        function edge(points, x, y, shade) {
+          quad(sprites, points, Array.from({ length: 4 }, () => [(x + 0.5) / 160, (y + 0.5) / 144]), shade);
+        }
+        for (let y = 0; y < 96; y++) {
+          const zTop = base + (sourceBottom - y) * size, zBottom = zTop - size;
+          for (let x = 0; x < 160;) {
+            if (world.pictures[y * 160 + x] !== id) { x++; continue; }
+            const start = x;
+            while (x < 160 && world.pictures[y * 160 + x] === id) x++;
+            const left = cx + (start - sourceX) * size, right = cx + (x - sourceX) * size;
+            const textureUV = [[start / 160, y / 144], [x / 160, y / 144],
+              [x / 160, (y + 1) / 144], [start / 160, (y + 1) / 144]];
+            quad(sprites, [[left, front, zTop], [right, front, zTop],
+              [right, front, zBottom], [left, front, zBottom]], textureUV);
+            if (depth) {
+              quad(sprites, [[left, back, zTop], [right, back, zTop],
+                [right, back, zBottom], [left, back, zBottom]], textureUV, 0.8);
+              edge([[left, back, zBottom], [left, front, zBottom], [left, front, zTop], [left, back, zTop]], start, y, 0.6);
+              edge([[right, front, zBottom], [right, back, zBottom], [right, back, zTop], [right, front, zTop]], x - 1, y, 0.8);
+              for (let px = start; px < x; px++) {
+                const x0 = cx + (px - sourceX) * size, x1 = x0 + size, i = y * 160 + px;
+                if (!y || world.pictures[i - 160] !== id) {
+                  edge([[x0, back, zTop], [x1, back, zTop], [x1, front, zTop], [x0, front, zTop]], px, y, 0.92);
+                }
+                if (y === 95 || world.pictures[i + 160] !== id) {
+                  edge([[x0, front, zBottom], [x1, front, zBottom], [x1, back, zBottom], [x0, back, zBottom]], px, y, 0.65);
+                }
+              }
+            }
+          }
+        }
+      }
+      geometry = { key, pictures: world.pictures.slice(), background: new Float32Array(background),
+        models: new Float32Array(models), sprites: new Float32Array(sprites), shadows: new Float32Array(shadows),
+        stats: { combatants: visible.length, platforms: world.combatants.length } };
+    }
+    battleCache.set(game, { ...geometry, palette, material });
+    return { active: true, battle: true, textures: { background: material, sprites: pictures, window: hud },
+      background: geometry.background, models: geometry.models, sprites: geometry.sprites, shadows: geometry.shadows,
+      material, shadowMaterial: material, origin: [0, 0], zoomFactor: world.zoomFactor, pitchOffset: world.pitchOffset,
+      clearColor: [...material.pixels.slice(0, 3)].map(value => value / 255).concat(1), stats: geometry.stats,
+      detail: `${world.name} · arène 3D · ${geometry.stats.combatants} silhouettes en volume · interface originale` };
+  }
 
   function build(game, preset, thickness) {
     if (!Number.isFinite(thickness) || thickness < 0 || thickness > 16) throw new Error("Epaisseur 3D invalide.");
     const world = preset.world?.(game);
-    if (!world?.active) return { active: false, reason: world?.reason || "Aucun preset 3D pour ce jeu." };
+    if (!world?.active) return { active: false, reason: world?.reason || "Aucun preset 3D pour ce jeu.",
+      ...(world?.battle ? { battle: true } : {}) };
+    if (world.battle) return buildBattle(game, world, thickness);
     const textures = Graphics.scene(game), models = [], background = [], sprites = [], shadows = [];
     if (world.screenMap) Graphics.mapWindow(game, textures);
     const tileData = world.tiles ? [...new Set([...world.tiles].map(code => code & 255))].map(tile => {
@@ -62,12 +175,6 @@
       const offset = (y * width + x) * 4;
       for (let i = 0; i < 3; i++) ground.pixels[offset + i] = Math.round(color[i] * shade);
       ground.pixels[offset + 3] = 255;
-    }
-    function quad(output, points, uv, shade = 1) {
-      for (const i of [0, 1, 2, 0, 2, 3]) {
-        const [x, y, z] = points[i];
-        output.push(x - 80, 72 - y, z, ...uv[i], shade);
-      }
     }
     function face(points, slot, shade = 1) {
       const u0 = (slot * 16 + 0.5) / 192, u1 = (slot * 16 + 15.5) / 192;

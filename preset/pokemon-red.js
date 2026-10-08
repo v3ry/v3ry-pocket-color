@@ -3,7 +3,7 @@
 
   // French Red revision 0: physical WRAM offsets, verified in the running cartridge.
   const RAM = { map: 0x1363, anchor: 0x1364, tileset: 0x136c, height: 0x136d, width: 0x136e,
-    bank: 0x1530, definitions: 0x1531, collision: 0x1535, bgAnchor: 0x152b, blocks: 0x6e8 };
+    bank: 0x1530, definitions: 0x1531, collision: 0x1535, bgAnchor: 0x152b, blocks: 0x6e8, battle: 0x105c };
   const word = (data, offset) => data[offset] | data[offset + 1] << 8;
   const screenMap = game => !!(game.io[0x40] & 32) && game.io[0x4a] === 0 && game.io[0x4b] === 7;
   const locations = {
@@ -267,6 +267,7 @@
 
   function terrain(game) {
     const flat = reason => ({ active: false, reason, depths: new Float32Array(1024), coverage: 0 });
+    if ([1, 2].includes(game.wram[RAM.battle])) return flat("combat Rouge · disponible en mode 3D");
     const map = mapData(game);
     if (!map) return flat("carte Rouge non reconnue · titre, combat ou transition");
     const rom = game.cartridge.rom, definitions = new Map(), ui = interfaceMask(game);
@@ -432,7 +433,82 @@
       zoomFactor: outdoor ? 0.7 : 1, pitchOffset: outdoor ? 35 : 25,
       clearColor: outdoor ? [0.64, 0.73, 0.44, 1] : [0.06, 0.09, 0.07, 1] };
   }
+  function battle(game) {
+    const flat = () => ({ active: false, battle: true, reason: "combat Rouge · sous-menu ou transition non reconnu" });
+    const lcd = game.io[0x40], fullWindow = screenMap(game);
+    if (!(lcd & 128) || !(lcd & 1)) return flat();
+    function tileAt(x, y) {
+      const window = !!(lcd & 32) && y >= game.io[0x4a] && x >= game.io[0x4b] - 7;
+      const tx = window ? x - (game.io[0x4b] - 7) : (x + game.io[0x43]) & 255;
+      const ty = window ? y - game.io[0x4a] : (y + game.io[0x42]) & 255;
+      const base = lcd & (window ? 64 : 8) ? 0x1c00 : 0x1800;
+      return { tile: game.vram[base + (ty >> 3) * 32 + (tx >> 3)], x: tx & 7, y: ty & 7 };
+    }
+    const tile = (x, y) => tileAt(x * 8, y * 8).tile;
+    const moveInfo = tile(0, 8) === 0x79 && tile(10, 8) === 0x7b
+      && tile(0, 12) === 0x7d && tile(10, 12) === 0x7e;
+    if ((!moveInfo && tile(0, 12) !== 0x79) || tile(19, 12) !== 0x7b
+      || tile(0, 17) !== 0x7d || tile(19, 17) !== 0x7e) return flat();
+    let pictureTiles = 0;
+    for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
+      pictureTiles += Number(tile(12 + x, y) === x * 7 + y);
+      pictureTiles += Number(tile(1 + x, 5 + y) === 49 + x * 7 + y);
+    }
+    const enemyHUD = tile(1, 3) === 0x74 && tile(10, 3) === 0x78;
+    const playerHUD = tile(9, 11) === 0x6f && tile(18, 11) === 0x77;
+    if (pictureTiles < 14 && !enemyHUD && !playerHUD) return flat();
+
+    const count = 160 * 96, ink = new Uint8Array(count), allocated = new Uint8Array(count);
+    const pictures = new Uint8Array(160 * 144), overlay = new Uint8Array(160 * 144);
+    const pictureColors = moveInfo ? new Int8Array(160 * 144).fill(-1) : null;
+    overlay.fill(1, count);
+    for (let y = 0; y < 96; y++) for (let x = 0; x < 160; x++) {
+      const i = y * 160 + x, occluded = moveInfo && x >= 8 && x < 64 && y >= 64;
+      const data = occluded ? { tile: 49 + ((x - 8) >> 3) * 7 + ((y - 40) >> 3), x: x & 7, y: y & 7 } : tileAt(x, y);
+      if ((y < 32 && x < 96) || (y >= 56 && x >= 72)
+        || (moveInfo && y >= 64 && x < 88) || (data.tile >= 98 && data.tile !== 0x7f)) {
+        overlay[i] = 1;
+        if (!occluded) continue;
+      }
+      const role = data.tile < 49 ? 1 : data.tile < 98 ? 2 : 0;
+      allocated[i] = role;
+      if (role) {
+        const color = game.tilePixel(data.tile, 0, data.x, data.y, !!(lcd & 16));
+        if (color) ink[i] = role;
+        if (occluded) pictureColors[i] = color;
+      }
+    }
+    // Flood only exterior colour-zero pixels; enclosed white details stay solid, even during palette flashes.
+    for (const role of [1, 2]) {
+      const exterior = new Uint8Array(count), queue = new Int32Array(count);
+      let end = 0;
+      function visit(i) {
+        if (exterior[i] || ink[i] === role) return;
+        exterior[i] = 1; queue[end++] = i;
+      }
+      for (let x = 0; x < 160; x++) { visit(x); visit(count - 160 + x); }
+      for (let y = 0; y < 96; y++) { visit(y * 160); visit(y * 160 + 159); }
+      for (let n = 0; n < end; n++) {
+        const i = queue[n], x = i % 160;
+        if (x) visit(i - 1);
+        if (x < 159) visit(i + 1);
+        if (i >= 160) visit(i - 160);
+        if (i < count - 160) visit(i + 160);
+      }
+      for (let i = 0; i < count; i++) {
+        if (ink[i] === role || (allocated[i] === role && !exterior[i])) pictures[i] = role;
+      }
+    }
+    return { active: true, battle: true, name: game.wram[RAM.battle] === 2 ? "Combat de dresseur" : "Combat sauvage",
+      screenMap: fullWindow, pictures, pictureColors, overlay,
+      combatants: [
+        { id: 1, sourceX: 124, sourceBottom: 56, x: 128, y: 34, size: 1.1 },
+        { id: 2, sourceX: 36, sourceBottom: 96, x: 36, y: 100, size: 1.15 },
+      ], zoomFactor: 1, pitchOffset: 30 };
+  }
   function world(game) {
+    // The FR ROM writes 2/1 to $D05C at ROM offsets $3EF98/$3EFA0 for trainer/wild battles.
+    if ([1, 2].includes(game.wram[RAM.battle])) return battle(game);
     const surface = terrain(game);
     if (!surface.active) return { active: false, reason: surface.reason };
     const map = mapData(game), location = locations[map.map];

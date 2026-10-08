@@ -2,12 +2,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { GameBoy } = require("../emulator.js");
-const { makeROM } = require("./helpers.cjs");
+const { makeROM, makeRedBattle } = require("./helpers.cjs");
 const States = require("../states.js");
 const Graphics = require("../graphics.js");
 const Scene = require("../scene.js");
 const preset = require("../preset/aladdin.js");
 const crystal = require("../preset/pokemon-crystal.js");
+const red = require("../preset/pokemon-red.js");
 const World = require("../world.js");
 const camera = { ...preset.camera, thickness: preset.thickness, light: 0.75 };
 const pixel = (image, x, y) => [...image.pixels.slice((y * image.width + x) * 4, (y * image.width + x) * 4 + 4)];
@@ -641,6 +642,36 @@ test("GPU upload slots reuse immutable data and replace changed geometry and tex
   assert.equal(gl.deleted.filter(resource => resource.kind === "Buffer").length, 5);
   assert.equal(renderer.uploadedVertices.size, 0);
   assert.equal(renderer.uploadedTextures.size, 0);
+});
+test("Red battle 3D uses existing GPU passes, filters before HUD and keeps 2.5D/fullscreen fallback intact", () => {
+  const game = makeRedBattle(), before = States.capture(game, "0".repeat(64)), gl = fakeGL();
+  const renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
+  const camera = { ...red.camera, thickness: 14, light: 0.73 };
+  assert.match(renderer.render(game, red, camera, "3d", true, "sharp").detail, /arène 3D.*2 silhouettes/);
+  assert.equal(gl.calls.filter(call => call.method === "drawArrays").length, 6);
+  assert.deepEqual(gl.calls.find(call => call.method === "uniform4f").args,
+    ["uCamera", 0, -50 * Math.PI / 180, 0.9, 1]);
+  const copy = gl.calls.findIndex(call => call.method === "copyTexSubImage2D");
+  const hud = gl.calls.findIndex(call => call.method === "uniform1f" && call.args[0] === "uHUD" && call.args[1] === 1);
+  assert.ok(copy > 0 && hud > copy);
+  gl.calls.length = 0;
+  renderer.render(game, red, { ...camera, yaw: 20 }, "3d", true, "soft");
+  assert.ok(!gl.calls.some(call => call.method === "bufferData"));
+  assert.equal(gl.calls.filter(call => call.method === "texImage2D").length, 2);
+  gl.calls.length = 0;
+  assert.equal(renderer.render(game, red, camera, "2.5d", true).smoothed, false);
+  assert.equal(gl.calls.filter(call => call.method === "drawArrays").length, 1);
+  assert.equal(gl.calls.find(call => call.method === "texImage2D").args[8], game.pixels);
+  const moves = makeRedBattle({ moveInfo: true });
+  assert.match(renderer.render(moves, red, camera, "3d", true).detail, /arène 3D/);
+  game.vram.fill(0x7f, 0x1c00, 0x1d80); gl.calls.length = 0;
+  const fallback = renderer.render(game, red, camera, "3d", true);
+  assert.equal(fallback.smoothed, false); assert.match(fallback.detail, /sous-menu ou transition/);
+  assert.equal(gl.calls.filter(call => call.method === "drawArrays").length, 1);
+  game.vram.set(before.memory.vram);
+  const after = States.capture(game, "0".repeat(64)); after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+  renderer.dispose(); assert.equal(gl.deleted.length, 18);
 });
 test("optional contour smoothing runs before HUD, reuses resources and resizes its screen texture", () => {
   const gl = fakeGL(), canvas = { width: 640, height: 576, getContext: () => gl };

@@ -2,7 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { GameBoy } = require("../emulator.js");
-const { makeROM } = require("./helpers.cjs");
+const { makeROM, makeRedBattle } = require("./helpers.cjs");
 const States = require("../states.js");
 const Scene = require("../scene.js");
 const World = require("../world.js");
@@ -599,7 +599,7 @@ test("procedural scenes preserve dialogue and fullscreen-window sprites without 
   const after = States.capture(game, "0".repeat(64)); after.createdAt = before.createdAt;
   assert.deepEqual(after, before);
 });
-test("Red dialogue pixels remain exact overlays in both render modes while title and battle screens stay flat", () => {
+test("Red dialogue pixels remain exact overlays in both render modes while unknown screens stay flat", () => {
   const game = map();
   dialogue(game);
   game.setVideoCapture(true); game.tick(70224);
@@ -616,6 +616,144 @@ test("Red dialogue pixels remain exact overlays in both render modes while title
   game.vram.fill(99, 0x1800, 0x1c00); dialogue(game);
   assert.equal(red.world(game).active, false);
   assert.equal(red.terrain(game).active, false);
+});
+test("Red battles activate for verified wild/trainer flags and either visible hardware tile map", () => {
+  for (const type of [1, 2]) for (const fullWindow of [false, true]) {
+    const game = makeRedBattle({ type, fullWindow }), descriptor = red.world(game);
+    assert.equal(Scene.selectPreset(game, [red]), red);
+    assert.equal(descriptor.active, true);
+    assert.equal(descriptor.battle, true);
+    assert.match(descriptor.name, type === 1 ? /sauvage/ : /dresseur/);
+    assert.equal(World.build(game, red, 14).stats.combatants, 2);
+    assert.equal(Scene.buildScene(game, red, 14).terrain.active, false);
+  }
+  for (const type of [0, 3, 255]) {
+    assert.equal(red.world(makeRedBattle({ type })).active, false);
+  }
+});
+test("battle flags do not turn off-LCD, malformed or fullscreen submenus into stale 3D maps", () => {
+  for (const lcd of [0, 0x63, 0xe2]) {
+    const game = makeRedBattle(); game.io[0x40] = lcd;
+    assert.equal(red.world(game).active, false);
+  }
+  for (const [x, y] of [[0, 12], [19, 12], [0, 17], [19, 17]]) {
+    const game = makeRedBattle(); game.vram[0x1c00 + y * 32 + x] = 0x7f;
+    assert.equal(red.world(game).active, false);
+  }
+  const game = map(); game.wram[0x105c] = 2; dialogue(game);
+  assert.equal(red.world(game).active, false);
+  assert.equal(red.terrain(game).active, false);
+  const menu = makeRedBattle(); menu.vram.fill(0x7f, 0x1c00, 0x1d80);
+  assert.equal(red.world(menu).active, false);
+});
+test("battle meshes have upright faces, backs, exposed edges, platforms and finite texture coordinates", () => {
+  const game = makeRedBattle();
+  for (const thickness of [0, 14, 16]) {
+    const world = World.build(game, red, thickness);
+    assert.equal(world.active, true); assert.equal(world.battle, true);
+    assert.deepEqual(world.stats, { combatants: 2, platforms: 2 });
+    assert.ok(world.background.length > 0 && world.models.length > 0 && world.shadows.length > 0);
+    const planes = new Set();
+    for (let i = 0; i < world.sprites.length; i += 6) planes.add(world.sprites[i + 1]);
+    assert.equal(planes.size, thickness ? 4 : 2);
+    assert.ok(world.sprites.some((value, i) => i % 6 === 2 && value > 40));
+    for (const vertices of [world.background, world.models, world.shadows, world.sprites]) {
+      assert.equal(vertices.length % 36, 0);
+      assert.ok(vertices.every(Number.isFinite));
+      for (let i = 0; i < vertices.length; i += 6) {
+        assert.ok(vertices[i + 3] >= 0 && vertices[i + 3] <= 1);
+        assert.ok(vertices[i + 4] >= 0 && vertices[i + 4] <= 1);
+      }
+    }
+  }
+  assert.throws(() => World.build(game, red, NaN), /invalide/);
+});
+test("battle HUD pixels and enclosed white details stay exact without mutating machine or state", () => {
+  const game = makeRedBattle(), before = States.capture(game, "0".repeat(64));
+  const descriptor = red.world(game), world = World.build(game, red, 14);
+  for (let i = 0; i < 160 * 144; i++) {
+    const offset = i * 4;
+    if (descriptor.overlay[i]) {
+      assert.deepEqual(world.textures.window.pixels.slice(offset, offset + 4), game.pixels.slice(offset, offset + 4));
+    } else assert.equal(world.textures.window.pixels[offset + 3], 0);
+    if (descriptor.pictures[i]) {
+      assert.deepEqual(world.textures.sprites.pixels.slice(offset, offset + 4), game.pixels.slice(offset, offset + 4));
+    } else assert.equal(world.textures.sprites.pixels[offset + 3], 0);
+  }
+  assert.equal(world.textures.sprites.pixels[(3 * 160 + 99) * 4 + 3], 255);
+  assert.deepEqual([...world.textures.sprites.pixels.slice((3 * 160 + 99) * 4, (3 * 160 + 99) * 4 + 3)], [232, 240, 208]);
+  assert.equal(world.textures.sprites.pixels[96 * 4 + 3], 0);
+  const after = States.capture(game, "0".repeat(64)); after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+});
+test("live palettes refresh textures without rebuilding masks or losing white silhouette interiors", () => {
+  const game = makeRedBattle(), first = World.build(game, red, 14), mask = red.world(game).pictures;
+  const same = World.build(game, red, 14);
+  assert.equal(same.sprites, first.sprites); assert.equal(same.models, first.models);
+  assert.equal(same.material, first.material);
+  game.io[0x47] = 0x1b; game.tick(70224);
+  const flash = World.build(game, red, 14);
+  assert.deepEqual(red.world(game).pictures, mask);
+  assert.equal(flash.sprites, first.sprites);
+  assert.notEqual(flash.material, first.material);
+  assert.notDeepEqual(flash.textures.sprites.pixels, first.textures.sprites.pixels);
+  assert.equal(flash.textures.sprites.pixels[(3 * 160 + 99) * 4 + 3], 255);
+  assert.deepEqual(flash.textures.sprites.pixels.slice((3 * 160 + 99) * 4, (3 * 160 + 99) * 4 + 4),
+    game.pixels.slice((3 * 160 + 99) * 4, (3 * 160 + 99) * 4 + 4));
+  game.vram.fill(0, 0x1000, 0x1010); game.tick(70224);
+  assert.notEqual(World.build(game, red, 14).sprites, first.sprites);
+});
+test("move selection preserves the covered Pokemon mesh and exact type/PP panel in either hardware map", () => {
+  for (const fullWindow of [false, true]) {
+    const game = makeRedBattle({ fullWindow }), menu = makeRedBattle({ fullWindow, moveInfo: true });
+    const before = States.capture(menu, "0".repeat(64)), original = World.build(game, red, 14);
+    const descriptor = red.world(menu), world = World.build(menu, red, 14);
+    assert.equal(world.active, true); assert.equal(world.stats.combatants, 2);
+    assert.deepEqual(descriptor.pictures, red.world(game).pictures);
+    assert.deepEqual(world.sprites, original.sprites);
+    for (let i = 0; i < descriptor.pictures.length; i++) if (descriptor.pictures[i]) {
+      assert.deepEqual(world.textures.sprites.pixels.slice(i * 4, i * 4 + 4),
+        original.textures.sprites.pixels.slice(i * 4, i * 4 + 4));
+    }
+    for (let y = 64; y < 104; y++) for (let x = 0; x < 88; x++) {
+      const offset = (y * 160 + x) * 4;
+      assert.deepEqual(world.textures.window.pixels.slice(offset, offset + 4), menu.pixels.slice(offset, offset + 4));
+    }
+    const after = States.capture(menu, "0".repeat(64)); after.createdAt = before.createdAt;
+    assert.deepEqual(after, before);
+  }
+});
+test("battle pictures disappear live on recall/fainting without stale meshes or shadows", () => {
+  const game = makeRedBattle(), first = World.build(game, red, 14);
+  for (let y = 0; y < 7; y++) game.vram.fill(0x7f, 0x1c00 + y * 32 + 12, 0x1c00 + y * 32 + 19);
+  game.tick(70224);
+  const one = World.build(game, red, 14);
+  assert.equal(one.active, true); assert.equal(one.stats.combatants, 1);
+  assert.ok(one.sprites.length < first.sprites.length && one.shadows.length < first.shadows.length);
+  for (let y = 5; y < 12; y++) game.vram.fill(0x7f, 0x1c00 + y * 32 + 1, 0x1c00 + y * 32 + 8);
+  game.tick(70224);
+  const empty = World.build(game, red, 14);
+  assert.equal(empty.active, true); assert.equal(empty.stats.combatants, 0);
+  assert.equal(empty.sprites.length, 0); assert.equal(empty.shadows.length, 0);
+});
+test("OAM battle effects retain their live screen pixels without becoming Pokemon voxels", () => {
+  const game = makeRedBattle();
+  game.vram.fill(255, 0xfe0, 0xff0); game.oam.set([64, 88, 254, 0]); game.tick(70224);
+  const world = World.build(game, red, 14), offset = (48 * 160 + 80) * 4;
+  assert.deepEqual(world.textures.window.pixels.slice(offset, offset + 4), game.pixels.slice(offset, offset + 4));
+  assert.equal(world.textures.window.pixels[offset + 3], 255);
+  assert.equal(world.textures.sprites.pixels[offset + 3], 0);
+});
+test("returning from a battle or restoring a map resumes the same overworld geometry", () => {
+  const game = map(), before = States.capture(game, "0".repeat(64)), original = World.build(game, red, 14);
+  const fight = makeRedBattle();
+  game.wram[0x105c] = 2; game.vram.set(fight.vram); game.io.set(fight.io);
+  game.setVideoCapture(true); game.tick(70224);
+  assert.equal(World.build(game, red, 14).battle, true);
+  States.restore(game, before, "0".repeat(64));
+  const restored = World.build(game, red, 14);
+  assert.equal(restored.battle, undefined); assert.equal(restored.active, true);
+  assert.equal(restored.models, original.models);
 });
 test("Red validates map memory and tables instead of enabling stale or malformed scenes", () => {
   for (const [offset, value] of [[0x1363, 255], [0x136c, 24], [0x136d, 0], [0x136e, 200],
