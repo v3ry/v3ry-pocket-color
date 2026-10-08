@@ -6,7 +6,9 @@
   function selectPreset(game, presets) {
     return presets.find(preset => preset.match.title === game.cartridge.title
       && preset.match.color === game.color && preset.match.cartridgeType === game.cartridge.type
-      && (preset.match.revision === undefined || preset.match.revision === game.cartridge.rom[0x14c])) || null;
+      && (preset.match.revision === undefined || preset.match.revision === game.cartridge.rom[0x14c])
+      && (preset.match.checksum === undefined
+        || preset.match.checksum === (game.cartridge.rom[0x14e] << 8 | game.cartridge.rom[0x14f]))) || null;
   }
   function validateCamera(camera) {
     for (const [key, min, max] of [["yaw", -45, 45], ["pitch", -35, 35], ["zoom", 0.5, 1.3],
@@ -20,6 +22,8 @@
     if (!Number.isFinite(thickness) || thickness < 0 || thickness > 16) throw new Error("Epaisseur 2.5D invalide.");
     const textures = Graphics.scene(game), vertices = [];
     const terrain = preset.terrain?.(game);
+    if (terrain?.active && terrain.screenMap) Graphics.mapWindow(game, textures);
+    if (terrain?.active && terrain.overlay) Graphics.overlay(game, textures, terrain.overlay);
     const scale = thickness / 8;
     function quad(points, uv, shade = 1) {
       for (const index of [0, 1, 2, 0, 2, 3]) {
@@ -29,13 +33,16 @@
     }
     let tiles = 0;
     if ((game.io[0x40] & 128) && (game.color || (game.io[0x40] & 1))) {
-      const sx = game.io[0x43], sy = game.io[0x42], map = game.io[0x40] & 8 ? 0x1c00 : 0x1800;
+      const sx = terrain?.screenMap ? 0 : game.io[0x43], sy = terrain?.screenMap ? 0 : game.io[0x42];
+      const map = terrain?.screenMap ? (game.io[0x40] & 0x40 ? 0x1c00 : 0x1800)
+        : game.io[0x40] & 8 ? 0x1c00 : 0x1800;
       for (let y = -(sy & 7); y < 144; y += 8) for (let x = -(sx & 7); x < 160; x += 8) {
         const tx = (x + sx) & 255, ty = (y + sy) & 255;
         const index = map + (ty >> 3) * 32 + (tx >> 3);
         const tile = game.vram[index], attr = game.color ? game.vram[8192 + index] : 0;
         const key = `${game.color && (attr & 8) ? 1 : 0}:${tile}`;
         const cell = (ty >> 3) * 32 + (tx >> 3);
+        if (terrain?.active && terrain.overlay?.[Math.max(0, y) * 160 + Math.max(0, x)]) continue;
         if (terrain?.active && terrain.hidden[cell]) continue;
         const depth = terrain ? terrain.active ? terrain.depths[cell] * scale : 0 : preset.tileDepths[key] ?? 0;
         const limit = terrain ? 64 : 32;

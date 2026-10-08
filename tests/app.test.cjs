@@ -14,6 +14,7 @@ const Graphics = require("../graphics.js");
 const Scene = require("../scene.js");
 const AladdinPreset = require("../preset/aladdin.js");
 const CrystalPreset = require("../preset/pokemon-crystal.js");
+const RedPreset = require("../preset/pokemon-red.js");
 
 class Element {
   constructor() {
@@ -90,7 +91,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
     PocketGraphics: Graphics,
-    PocketPresets: [AladdinPreset, CrystalPreset],
+    PocketPresets: [AladdinPreset, CrystalPreset, RedPreset],
     PocketScene: { ...Scene, Renderer: class {
       render(game, preset, camera, mode) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneMode = mode; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360 }; }
       dispose() { scope.sceneDisposed = true; }
@@ -295,6 +296,27 @@ test("automatic 2.5D rendering is capped at 30 Hz and stops work in original 2D"
   for (time = 1000; time < 2000; time++) h.evaluate("draw()");
   assert.equal(h.scope.sceneRenders, 30);
   assert.equal(h.evaluate("emulator.videoLayers()"), null);
+});
+
+test("French Red exposes both render modes and a cartridge-specific label without changing saves", async () => {
+  const h = harness(), rom = makeROM({ type: 0x1b, sizeCode: 5, ramSize: 3, program: [0x18, 0xfe] });
+  rom.fill(0, 0x134, 0x144);
+  rom.set(Buffer.from("POKEMON RED"), 0x134);
+  rom[0x14c] = 0; rom[0x14e] = 0x7a; rom[0x14f] = 0xfc;
+  let checksum = 0;
+  for (let i = 0x134; i <= 0x14c; i++) checksum = (checksum - rom[i] - 1) & 255;
+  rom[0x14d] = checksum;
+  await load(h, "red.gb", rom);
+  assert.equal(h.evaluate("scenePreset.id"), RedPreset.id);
+  assert.equal(h.element("#world-option").textContent, "3D · Pokémon Rouge FR");
+  assert.equal(h.element("#world-option").disabled, false);
+  await h.element("#pause-button").fire("click");
+  const before = structuredClone(h.store.records);
+  for (const mode of ["2.5d", "3d", "2d"]) {
+    h.element("#render-mode").value = mode; h.element("#render-mode").fire("change");
+    assert.equal(h.evaluate("paused"), true);
+  }
+  assert.deepEqual(h.store.records, before);
 });
 
 test("Crystal 1.1 selects its own camera and relief without affecting pause or saves", async () => {

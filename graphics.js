@@ -83,14 +83,31 @@
         sprites: image(160, 144), window: image(160, 144), screenSpace: true };
     }
     const data = inspect(game, { background: false, sprites: false, sceneOnly: true });
+    const sprites = spriteLayer(game, false);
+    return { background: data.maps[game.io[0x40] & 8 ? 1 : 0], sprites, window: data.preview, screenSpace: false };
+  }
+  function spriteLayer(game, window) {
     const sprites = image(160, 144), view = Object.create(game);
     view.pixels = sprites.pixels;
     view.windowLine = 0;
     view.paint = function (x, color, palette, object = false) {
       if (object) game.paint.call(this, x, color, palette, true);
     };
-    for (view.ly = 0; view.ly < 144; view.ly++) view.renderLine({ window: false });
-    return { background: data.maps[game.io[0x40] & 8 ? 1 : 0], sprites, window: data.preview, screenSpace: false };
+    for (view.ly = 0; view.ly < 144; view.ly++) view.renderLine({ window });
+    return sprites;
+  }
+  function mapWindow(game, textures) {
+    // Red uses a full-screen hardware window for dialogue, not just the text rectangle.
+    const background = image(160, 144);
+    background.pixels.set(textures.window.pixels[3] ? textures.window.pixels : textures.background.pixels);
+    const sprites = spriteLayer(game, true);
+    if (textures.screenSpace) for (let i = 0; i < 160 * 144; i++) {
+      if (sprites.pixels[i * 4 + 3]) background.pixels.set(textures.background.pixels.subarray(i * 4, i * 4 + 4), i * 4);
+    }
+    textures.background = background;
+    textures.sprites = sprites;
+    textures.window = image(160, 144);
+    textures.screenSpace = true;
   }
   function spriteComponents(image) {
     const { width, height, pixels } = image, labels = new Int16Array(width * height).fill(-1), components = [];
@@ -114,7 +131,7 @@
   }
   function tileGrid(game, tiles, columns, rows) {
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1
-      || columns > 32 || rows > 32 || tiles.length !== columns * rows) {
+      || columns > 128 || rows > 128 || tiles.length !== columns * rows) {
       throw new Error("Dimensions de texture de carte invalides.");
     }
     const output = image(columns * 8, rows * 8), view = Object.create(game);
@@ -134,7 +151,19 @@
     }
     return output;
   }
-  const api = { inspect, scene, spriteComponents, tileGrid };
+  function overlay(game, textures, mask) {
+    for (let i = 0; i < mask.length; i++) {
+      if (!mask[i]) continue;
+      const offset = i * 4, layer = textures.window.pixels[offset + 3] ? textures.window
+        : textures.sprites.pixels[offset + 3] ? textures.sprites : textures.background;
+      const source = layer === textures.background && !textures.screenSpace
+        ? ((((Math.floor(i / 160) + game.io[0x42]) & 255) * 256 + ((i % 160 + game.io[0x43]) & 255)) * 4)
+        : offset;
+      textures.window.pixels.set(layer.pixels.subarray(source, source + 4), offset);
+      textures.sprites.pixels[offset + 3] = 0;
+    }
+  }
+  const api = { inspect, scene, spriteComponents, tileGrid, overlay, mapWindow };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.PocketGraphics = api;
 })(globalThis);

@@ -26,6 +26,11 @@ test("3D tile grid decodes signed graphics from both banks with explicit palette
   assert.throws(() => tileGrid(game, [0], 33, 1), /Dimensions/);
   assert.throws(() => tileGrid(game, [2048], 1, 1), /Tuile/);
   assert.throws(() => tileGrid(game, [-1], 1, 1), /Tuile/);
+  const dmg = new GameBoy(makeROM());
+  const fullMap = tileGrid(dmg, new Uint16Array(40 * 36), 40, 36);
+  assert.equal(fullMap.width, 320);
+  assert.equal(fullMap.height, 288);
+  assert.throws(() => tileGrid(dmg, new Uint16Array(129), 129, 1), /Dimensions/);
 });
 
 test("graphics inspection is read-only, including pixels, window counter and mapper state", () => {

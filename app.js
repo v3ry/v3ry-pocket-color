@@ -516,11 +516,13 @@ function updateScene(force = false) {
     option.disabled = !scenePreset;
     option.textContent = scenePreset ? `2.5D · ${scenePreset.label || scenePreset.match.title}` : "2.5D · preset requis";
     document.querySelector("#world-option").disabled = !scenePreset?.world;
+    document.querySelector("#world-option").textContent = scenePreset?.world
+      ? `3D · ${scenePreset.label || scenePreset.match.title}` : "3D · preset requis";
     if (renderMode.value === "3d" && scenePreset && !scenePreset.world) renderMode.value = "2.5d";
     resetSceneCamera();
     if (!scenePreset) returnTo2D(emulator
       ? "Aucun preset 2.5D pour cette ROM : rendu 2D conservé."
-      : "Prototype 2.5D : chargez Pokémon Cristal UE 1.1 ou Aladdin GBC pour activer un preset.");
+      : "Prototype 2.5D : chargez Pokémon Rouge FR, Cristal UE 1.1 ou Aladdin GBC pour activer un preset.");
     else sceneMessage(`Preset disponible : ${scenePreset.name}. Choisissez le rendu 2.5D${scenePreset.world ? " ou 3D" : ""} pour l’activer.`);
     force = true;
   }

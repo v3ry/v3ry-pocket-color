@@ -20,7 +20,7 @@ function worker() {
     self: { registration: { scope }, clients: { async claim() {} }, addEventListener: (name, callback) => { events[name] = callback; } },
     caches: {
       async open() { return cache; },
-      async keys() { return ["unrelated-cache", "v3ry-pocket-color-app-v1", "v3ry-pocket-color-app-v2", "v3ry-pocket-color-app-v3", "v3ry-pocket-color-app-v4", "v3ry-pocket-color-app-v5", "v3ry-pocket-color-app-v6", "v3ry-pocket-color-app-v7", "v3ry-pocket-color-app-v8", "v3ry-pocket-color-app-v9"]; },
+      async keys() { return ["unrelated-cache", ...Array.from({ length: 16 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`)]; },
       async delete(name) { deleted.push(name); },
     },
     async fetch(request) { network.push(request.url); return { network: true }; },
@@ -38,13 +38,13 @@ function worker() {
 test("service worker precaches only existing application assets and serves offline routes", async () => {
   const w = worker();
   await w.lifecycle("install");
-  assert.equal(w.storage.size, 20);
+  assert.equal(w.storage.size, 21);
   for (const url of w.storage.keys()) assert.ok(fs.existsSync(path.join(__dirname, "..", new URL(url).pathname.slice("/pocket/".length))));
   assert.equal((await w.request(w.scope)).url, w.scope + "index.html");
   assert.equal((await w.request(w.scope + "app.js?version=1")).cached, true);
   assert.equal(w.network.length, 0);
   await w.lifecycle("activate");
-  assert.deepEqual(w.deleted, ["v3ry-pocket-color-app-v1", "v3ry-pocket-color-app-v2", "v3ry-pocket-color-app-v3", "v3ry-pocket-color-app-v4", "v3ry-pocket-color-app-v5", "v3ry-pocket-color-app-v6", "v3ry-pocket-color-app-v7", "v3ry-pocket-color-app-v8"]);
+  assert.deepEqual(w.deleted, Array.from({ length: 15 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
 });
 
 test("service worker never intercepts ROM, ZIP, saves, cross-origin or write requests", async () => {
@@ -55,7 +55,7 @@ test("service worker never intercepts ROM, ZIP, saves, cross-origin or write req
   }
   assert.equal(await w.request("https://other.test/pocket/app.js"), null);
   assert.equal(await w.request(w.scope + "app.js", "POST"), null);
-  assert.equal(w.storage.size, 20);
+  assert.equal(w.storage.size, 21);
   assert.equal(w.network.length, 0);
 });
 

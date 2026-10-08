@@ -19,6 +19,7 @@
     <script src="graphics.js" defer></script>
     <script src="preset/aladdin.js" defer></script>
     <script src="preset/pokemon-crystal.js" defer></script>
+    <script src="preset/pokemon-red.js" defer></script>
     <script src="world.js" defer></script>
     <script src="scene.js" defer></script>
     <script src="app.js" defer></script>
@@ -102,7 +103,7 @@
           <button id="reset-button" type="button" disabled>Redémarrer</button>
           <button id="sound-button" type="button" aria-pressed="false">Activer le son</button>
           <button id="fullscreen-button" type="button" aria-pressed="false" aria-keyshortcuts="F">Plein écran</button>
-          <label class="speed-control" for="render-mode">Rendu <select id="render-mode"><option value="2d">2D original</option><option value="2.5d" id="scene-option" disabled>2.5D · preset requis</option><option value="3d" id="world-option" disabled>3D · Cristal</option></select></label>
+          <label class="speed-control" for="render-mode">Rendu <select id="render-mode"><option value="2d">2D original</option><option value="2.5d" id="scene-option" disabled>2.5D · preset requis</option><option value="3d" id="world-option" disabled>3D · preset requis</option></select></label>
           <label class="speed-control" for="playback-speed">Vitesse <select id="playback-speed"><option value="1">×1</option><option value="2">×2</option><option value="4">×4</option></select></label>
           <button id="capture-screen" type="button">Capture PNG</button>
           <button id="quick-save" class="immersive-only" type="button" disabled>État · F6</button>
@@ -111,11 +112,12 @@
         </div>
         <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
         <p id="comfort-status" class="status-message" role="status" aria-live="polite">Vitesse normale. Le son est coupé pendant l’avance rapide.</p>
-        <p id="scene-status" class="status-message" role="status" aria-live="polite">Prototype 2.5D : chargez Pokémon Cristal UE 1.1 ou Aladdin GBC pour activer un preset.</p>
+        <p id="scene-status" class="status-message" role="status" aria-live="polite">Prototype 2.5D : chargez Pokémon Rouge FR, Cristal UE 1.1 ou Aladdin GBC pour activer un preset.</p>
         <details class="settings">
           <summary>Caméra et relief 2.5D / 3D</summary>
           <p>Prototype visuel : Aladdin sépare ses couches ; Cristal UE 1.1 ajoute un relief selon les collisions de la carte et redresse les personnages. Menus non reconnus sans relief, fenêtre en surimpression. Le jeu et ses collisions restent en 2D.</p>
           <p>Mode 3D : Bourg Geon conserve ses arbres et maisons modélisés. Les autres cartes reconnues de Cristal utilisent un sol horizontal texturé, des volumes selon les collisions et des personnages debout : villes, routes, intérieurs, grottes, passages et donjons. Start et les dialogues standard restent en surimpression au-dessus du décor 3D. Décors génériques approximatifs ; combats et sous-menus plein écran en 2D.</p>
+          <p>Rouge français : Bourg Palette, ses intérieurs et la Route 1 ont leurs modèles dédiés. Jadielle et ses intérieurs, la Forêt de Jade et les grottes ont des motifs vérifiés sur leurs plans ROM : arbres composites, mobilier texturé, appareils de soin, parois orientées et échelles. Les autres cartes reconnues utilisent des décors procéduraux enrichis pour les 24 familles d’environnements ; les motifs inconnus restent sculptés au pixel. Les grandes cartes utilisent une région locale. Dialogues et Start restent fixes ; combats en 2D. Ce n’est pas encore une modélisation manuelle fidèle de chaque lieu de Kanto.</p>
           <div class="settings-row">
             <label for="scene-yaw">Rotation <input id="scene-yaw" type="range" min="-45" max="45" value="-18"> <output id="scene-yaw-value">-18°</output></label>
             <label for="scene-pitch">Inclinaison <input id="scene-pitch" type="range" min="-35" max="35" value="10"> <output id="scene-pitch-value">10°</output></label>
