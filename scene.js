@@ -199,8 +199,145 @@
       }
       gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 6);
     }
-    render(game, preset, camera, mode = "2.5d") {
+    smoothContours(filter = "light", native2D = false) {
+      if (!["light", "soft", "sharp", "crt"].includes(filter)) throw new Error("Filtre shader invalide.");
+      const gl = this.gl;
+      if (!this.smoothing) {
+        const vertex = this.shader(gl.VERTEX_SHADER, `
+          attribute vec3 aPosition;
+          attribute vec2 aUV;
+          varying vec2 vUV;
+          void main() {
+            vUV = vec2(aUV.x, 1.0 - aUV.y);
+            gl_Position = vec4(aPosition.x / 80.0, aPosition.y / 72.0, 0.0, 1.0);
+          }`);
+        const fragment = this.shader(gl.FRAGMENT_SHADER, `
+          precision mediump float;
+          uniform sampler2D uTexture;
+          uniform vec2 uPixel;
+          uniform vec2 uStep;
+          uniform float uFilter;
+          varying vec2 vUV;
+          float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+          bool same(vec3 a, vec3 b) { return all(lessThan(abs(a - b), vec3(0.002))); }
+          void main() {
+            vec3 center = texture2D(uTexture, vUV).rgb;
+            if (uFilter > 0.5 && uFilter < 1.5) {
+              vec2 cell = (floor(vUV / uStep) + 0.5) * uStep;
+              vec2 side = step(vec2(0.5), fract(vUV / uStep)) * 2.0 - 1.0;
+              vec3 pixel = texture2D(uTexture, vUV).rgb;
+              vec3 nearH = texture2D(uTexture, cell + vec2(side.x * uStep.x, 0.0)).rgb;
+              vec3 nearV = texture2D(uTexture, cell + vec2(0.0, side.y * uStep.y)).rgb;
+              vec3 farH = texture2D(uTexture, cell - vec2(side.x * uStep.x, 0.0)).rgb;
+              vec3 farV = texture2D(uTexture, cell - vec2(0.0, side.y * uStep.y)).rgb;
+              gl_FragColor = vec4(same(nearH, nearV) && !same(nearH, farV) && !same(nearV, farH) ? nearH : pixel, 1.0);
+              return;
+            }
+            if (uFilter > 0.5) {
+              vec2 step = uStep * 0.5;
+              vec3 neighbors = texture2D(uTexture, vUV + vec2(step.x, 0.0)).rgb
+                + texture2D(uTexture, vUV - vec2(step.x, 0.0)).rgb
+                + texture2D(uTexture, vUV + vec2(0.0, step.y)).rgb
+                + texture2D(uTexture, vUV - vec2(0.0, step.y)).rgb;
+              vec3 corners = texture2D(uTexture, vUV + step).rgb
+                + texture2D(uTexture, vUV - step).rgb
+                + texture2D(uTexture, vUV + vec2(step.x, -step.y)).rgb
+                + texture2D(uTexture, vUV + vec2(-step.x, step.y)).rgb;
+              vec3 soft = center * 0.25 + neighbors * 0.125 + corners * 0.0625;
+              if (uFilter < 2.5) {
+                gl_FragColor = vec4(clamp(center + (center - soft) * 0.8, 0.0, 1.0), 1.0);
+              } else {
+                float scan = 0.83 + 0.17 * cos(vUV.y * 144.0 * 6.2831853);
+                float stripe = mod(floor(gl_FragCoord.x), 3.0);
+                vec3 mask = stripe < 1.0 ? vec3(1.0, 0.86, 0.86)
+                  : stripe < 2.0 ? vec3(0.86, 1.0, 0.86) : vec3(0.86, 0.86, 1.0);
+                vec2 edge = vUV * 2.0 - 1.0;
+                float vignette = 1.0 - 0.17 * dot(edge, edge);
+                gl_FragColor = vec4(clamp(mix(center, soft, 0.3) * 1.1 * scan * mask * vignette, 0.0, 1.0), 1.0);
+              }
+              return;
+            }
+            float nw = luma(texture2D(uTexture, vUV + vec2(-1.0, 1.0) * uPixel).rgb);
+            float ne = luma(texture2D(uTexture, vUV + vec2(1.0, 1.0) * uPixel).rgb);
+            float sw = luma(texture2D(uTexture, vUV + vec2(-1.0, -1.0) * uPixel).rgb);
+            float se = luma(texture2D(uTexture, vUV + vec2(1.0, -1.0) * uPixel).rgb);
+            float middle = luma(center);
+            float low = min(middle, min(min(nw, ne), min(sw, se)));
+            float high = max(middle, max(max(nw, ne), max(sw, se)));
+            if (high - low < max(0.04, high * 0.125)) {
+              gl_FragColor = vec4(center, 1.0);
+              return;
+            }
+            vec2 direction = vec2(-(nw + ne - sw - se), nw + sw - ne - se);
+            float reduce = max((nw + ne + sw + se) * 0.03125, 0.0078125);
+            direction = clamp(direction / (min(abs(direction.x), abs(direction.y)) + reduce),
+              vec2(-4.0), vec2(4.0)) * uPixel;
+            vec3 narrow = 0.5 * (texture2D(uTexture, vUV - direction / 6.0).rgb
+              + texture2D(uTexture, vUV + direction / 6.0).rgb);
+            vec3 wide = narrow * 0.5 + 0.25 * (texture2D(uTexture, vUV - direction * 0.5).rgb
+              + texture2D(uTexture, vUV + direction * 0.5).rgb);
+            float value = luma(wide);
+            gl_FragColor = vec4(mix(center, value < low || value > high ? narrow : wide, 0.75), 1.0);
+          }`);
+        const program = gl.createProgram();
+        if (!program) throw new Error("Creation du programme de lissage impossible.");
+        this.resources.push(["program", program]);
+        gl.attachShader(program, vertex); gl.attachShader(program, fragment); gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "Liaison du lissage impossible.");
+        const texture = gl.createTexture(), buffer = gl.createBuffer();
+        if (texture) this.resources.push(["texture", texture]);
+        if (buffer) this.resources.push(["buffer", buffer]);
+        if (!texture || !buffer) throw new Error("Creation des ressources de lissage impossible.");
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        for (const name of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, name, gl.LINEAR);
+        for (const name of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) gl.texParameteri(gl.TEXTURE_2D, name, gl.CLAMP_TO_EDGE);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, this.hud, gl.STATIC_DRAW);
+        this.smoothing = { program, texture, buffer, width: 0, height: 0,
+          filter: gl.getUniformLocation(program, "uFilter"), step: gl.getUniformLocation(program, "uStep"),
+          pixel: gl.getUniformLocation(program, "uPixel"), sampler: gl.getUniformLocation(program, "uTexture"),
+          position: gl.getAttribLocation(program, "aPosition"), uv: gl.getAttribLocation(program, "aUV") };
+      }
+      const effect = this.smoothing, { width, height } = this.canvas;
+      gl.bindTexture(gl.TEXTURE_2D, effect.texture);
+      if (effect.width !== width || effect.height !== height) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, null);
+        effect.width = width; effect.height = height;
+      }
+      // Copy only the world image; fixed menus and dialogue are drawn afterwards.
+      gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
+      gl.disable(gl.DEPTH_TEST);
+      gl.useProgram(effect.program);
+      gl.uniform1i(effect.sampler, 0); gl.uniform2f(effect.pixel, 1 / width, 1 / height);
+      gl.uniform1f(effect.filter, ["light", "soft", "sharp", "crt"].indexOf(filter));
+      gl.uniform2f(effect.step, native2D ? 1 / 160 : 2 / width, native2D ? 1 / 144 : 2 / height);
+      for (const location of Object.values(this.attributes)) gl.disableVertexAttribArray(location);
+      gl.bindBuffer(gl.ARRAY_BUFFER, effect.buffer);
+      for (const [location, size, offset] of [[effect.position, 3, 0], [effect.uv, 2, 12]]) {
+        gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location, size, gl.FLOAT, false, 24, offset);
+      }
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.disableVertexAttribArray(effect.position); gl.disableVertexAttribArray(effect.uv);
+      gl.useProgram(this.program);
+    }
+    render2D(game, filter = "light") {
+      if (!["light", "soft", "sharp", "crt"].includes(filter)) throw new Error("Filtre shader invalide.");
+      const gl = this.gl;
+      if (gl.isContextLost()) throw new Error("Contexte WebGL perdu.");
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE);
+      gl.useProgram(this.program); gl.activeTexture(gl.TEXTURE0);
+      gl.uniform1i(this.uniforms.uTexture, 0);
+      gl.uniform1f(this.uniforms.uHUD, 1); gl.uniform1f(this.uniforms.uLight, 0);
+      this.draw(this.hud, 4, { width: 160, height: 144, pixels: game.pixels });
+      this.smoothContours(filter, true);
+      const error = gl.getError();
+      if (error !== gl.NO_ERROR) throw new Error(`Erreur WebGL : ${error}.`);
+      return { smoothed: true, detail: "2D · contours lissés" };
+    }
+    render(game, preset, camera, mode = "2.5d", smoothing = false, filter = "light") {
       validateCamera(camera);
+      if (typeof smoothing !== "boolean") throw new Error("Réglage de lissage invalide.");
+      if (!["light", "soft", "sharp", "crt"].includes(filter)) throw new Error("Filtre shader invalide.");
       const gl = this.gl;
       if (gl.isContextLost()) throw new Error("Contexte WebGL perdu. Revenez en 2D puis réessayez.");
       const world = mode === "3d" ? World.build(game, preset, camera.thickness) : null;
@@ -229,6 +366,7 @@
         if (world?.active) this.draw(scene.models, 2, scene.material);
         if (world?.active && scene.shadows.length) this.draw(scene.shadows, 3, scene.shadowMaterial);
         this.draw(scene.sprites, 1, scene.textures.sprites);
+        if (smoothing) this.smoothContours(filter);
         gl.disable(gl.DEPTH_TEST);
         gl.uniform1f(this.uniforms.uHUD, 1);
         gl.uniform1f(this.uniforms.uLight, 0);
@@ -236,7 +374,7 @@
       }
       const error = gl.getError();
       if (error !== gl.NO_ERROR) throw new Error(`Erreur WebGL : ${error}.`);
-      return { tiles: scene.tiles, detail: world?.active ? world.detail
+      return { tiles: scene.tiles, smoothed: smoothing && !(scene.terrain && !scene.terrain.active), detail: world?.active ? world.detail
         : world ? scene.terrain && !scene.terrain.active ? `3D : ${scene.terrain.reason}` : world.reason
           : scene.terrain?.reason };
     }
@@ -248,6 +386,7 @@
       this.resources.length = 0;
       this.uploadedVertices?.clear();
       this.uploadedTextures?.clear();
+      this.smoothing = null;
     }
   }
   const api = { selectPreset, validateCamera, buildScene, Renderer };

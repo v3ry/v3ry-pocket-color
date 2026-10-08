@@ -540,7 +540,7 @@ test("capture started mid-frame waits for a complete image and restoration drops
 function fakeGL({ compile = true, link = true, error = 0 } = {}) {
   const gl = { calls: [], deleted: [], VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4,
     TEXTURE_2D: 5, TEXTURE_MIN_FILTER: 6, TEXTURE_MAG_FILTER: 7, NEAREST: 8, TEXTURE_WRAP_S: 9, TEXTURE_WRAP_T: 10,
-    CLAMP_TO_EDGE: 11, ARRAY_BUFFER: 12, DYNAMIC_DRAW: 13, STATIC_DRAW: 23, FLOAT: 14, TRIANGLES: 15, RGBA: 16, UNSIGNED_BYTE: 17,
+    CLAMP_TO_EDGE: 11, LINEAR: 24, RGB: 25, ARRAY_BUFFER: 12, DYNAMIC_DRAW: 13, STATIC_DRAW: 23, FLOAT: 14, TRIANGLES: 15, RGBA: 16, UNSIGNED_BYTE: 17,
     COLOR_BUFFER_BIT: 1, DEPTH_BUFFER_BIT: 2, DEPTH_TEST: 18, LEQUAL: 19, BLEND: 20, CULL_FACE: 21, TEXTURE0: 22, NO_ERROR: 0,
     getShaderParameter: () => compile, getProgramParameter: () => link,
     getShaderInfoLog: () => "shader failed", getProgramInfoLog: () => "link failed",
@@ -553,7 +553,7 @@ function fakeGL({ compile = true, link = true, error = 0 } = {}) {
   }
   for (const method of ["shaderSource", "compileShader", "attachShader", "linkProgram", "bindTexture", "texParameteri",
     "viewport", "clearColor", "clear", "enable", "depthFunc", "disable", "useProgram", "activeTexture", "uniform1i",
-    "uniform4f", "uniform2f", "uniform1f", "texImage2D", "bindBuffer", "bufferData", "enableVertexAttribArray", "vertexAttribPointer", "drawArrays"]) {
+    "uniform4f", "uniform2f", "uniform1f", "texImage2D", "copyTexSubImage2D", "bindBuffer", "bufferData", "enableVertexAttribArray", "disableVertexAttribArray", "vertexAttribPointer", "drawArrays"]) {
     gl[method] = (...args) => gl.calls.push({ method, args });
   }
   return gl;
@@ -641,6 +641,100 @@ test("GPU upload slots reuse immutable data and replace changed geometry and tex
   assert.equal(gl.deleted.filter(resource => resource.kind === "Buffer").length, 5);
   assert.equal(renderer.uploadedVertices.size, 0);
   assert.equal(renderer.uploadedTextures.size, 0);
+});
+test("optional contour smoothing runs before HUD, reuses resources and resizes its screen texture", () => {
+  const gl = fakeGL(), canvas = { width: 640, height: 576, getContext: () => gl };
+  const renderer = new Scene.Renderer(canvas), game = new GameBoy(makeROM({ color: true }));
+  renderer.render(game, preset, camera);
+  assert.equal(renderer.smoothing, undefined);
+  assert.ok(!gl.calls.some(c => c.method === "copyTexSubImage2D"));
+  gl.calls.length = 0;
+  assert.equal(renderer.render(game, preset, camera, "2.5d", true).smoothed, true);
+  const effect = renderer.smoothing;
+  const copy = gl.calls.findIndex(c => c.method === "copyTexSubImage2D");
+  const post = gl.calls.findIndex(c => c.method === "useProgram" && c.args[0] === effect.program);
+  const hud = gl.calls.findIndex(c => c.method === "uniform1f" && c.args[0] === "uHUD" && c.args[1] === 1);
+  assert.ok(copy >= 0 && post > copy && hud > post);
+  assert.equal(gl.calls.filter(c => c.method === "drawArrays").length, 4);
+  assert.deepEqual(gl.calls.find(c => c.method === "uniform2f" && c.args[0] === "uPixel").args,
+    ["uPixel", 1 / 640, 1 / 576]);
+  assert.ok(gl.calls.some(c => c.method === "texParameteri" && c.args[2] === gl.LINEAR));
+  assert.equal(gl.calls.find(c => c.method === "texImage2D" && c.args[8] === null).args[2], gl.RGB);
+  gl.calls.length = 0;
+  renderer.render(game, preset, camera, "2.5d", true);
+  assert.equal(renderer.smoothing, effect);
+  assert.ok(!gl.calls.some(c => c.method === "bufferData" && c.args[1] === renderer.hud || c.method === "shaderSource"
+    || c.method === "texImage2D" && c.args[8] === null));
+  canvas.width = 320; canvas.height = 288;
+  gl.calls.length = 0;
+  renderer.render(game, preset, camera, "2.5d", true);
+  assert.deepEqual(gl.calls.find(c => c.method === "texImage2D" && c.args[8] === null).args.slice(3, 5), [320, 288]);
+  gl.calls.length = 0;
+  renderer.render(game, preset, camera, "2.5d", false);
+  assert.ok(!gl.calls.some(c => c.method === "copyTexSubImage2D"));
+  assert.throws(() => renderer.render(game, preset, camera, "2.5d", "yes"), /lissage invalide/);
+  renderer.dispose();
+  assert.equal(gl.deleted.length, 18);
+  renderer.dispose();
+  assert.equal(gl.deleted.length, 18);
+});
+test("smoothing bypasses unrecognized fullscreen menus and also supports the 3D world pass", () => {
+  const gl = fakeGL(), renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
+  const game = town(), view = { ...crystal.camera, thickness: 14, light: 0.73 };
+  assert.equal(renderer.render(game, crystal, view, "3d", true).smoothed, true);
+  game.vram.fill(99, 0x1800, 0x1c00); gl.calls.length = 0;
+  assert.equal(renderer.render(game, crystal, view, "3d", true).smoothed, false);
+  assert.equal(gl.calls.filter(c => c.method === "drawArrays").length, 1);
+  assert.ok(!gl.calls.some(c => c.method === "copyTexSubImage2D"));
+  renderer.dispose();
+});
+test("2D filtering uses the complete original image without presets, camera, capture or emulation changes", () => {
+  const gl = fakeGL(), renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
+  const game = new GameBoy(makeROM()), before = States.capture(game, "0".repeat(64));
+  assert.equal(renderer.render2D(game).smoothed, true);
+  assert.equal(gl.calls.filter(c => c.method === "drawArrays").length, 2);
+  assert.equal(gl.calls.find(c => c.method === "texImage2D").args[8], game.pixels);
+  assert.ok(gl.calls.some(c => c.method === "copyTexSubImage2D"));
+  assert.ok(!gl.calls.some(c => c.method === "uniform4f"));
+  assert.equal(game.videoLayers(), null);
+  const after = States.capture(game, "0".repeat(64)); after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+  renderer.dispose();
+  assert.equal(gl.deleted.length, 18);
+});
+test("shader choices reuse a single GPU program and supply source-pixel steps only in 2D", () => {
+  const gl = fakeGL(), renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
+  const game = new GameBoy(makeROM());
+  for (const [i, filter] of ["light", "soft", "sharp", "crt"].entries()) {
+    gl.calls.length = 0;
+    renderer.render2D(game, filter);
+    assert.deepEqual(gl.calls.find(c => c.method === "uniform1f" && c.args[0] === "uFilter").args, ["uFilter", i]);
+    assert.deepEqual(gl.calls.find(c => c.method === "uniform2f" && c.args[0] === "uStep").args, ["uStep", 1 / 160, 1 / 144]);
+    assert.equal(renderer.resources.length, 18);
+    if (i) assert.ok(!gl.calls.some(c => c.method === "shaderSource"));
+  }
+  gl.calls.length = 0;
+  renderer.render(game, preset, camera, "2.5d", true, "soft");
+  assert.deepEqual(gl.calls.find(c => c.method === "uniform2f" && c.args[0] === "uStep").args, ["uStep", 2 / 640, 2 / 576]);
+  assert.throws(() => renderer.render2D(game, "invalid"), /shader invalide/);
+  assert.throws(() => renderer.render(game, preset, camera, "2.5d", true, "invalid"), /shader invalide/);
+  renderer.dispose();
+  assert.equal(gl.deleted.length, 18);
+});
+test("optional shader compilation and resource failures are surfaced and allocated resources can be released", () => {
+  for (const failure of ["compile", "link", "texture", "buffer"]) {
+    const gl = fakeGL(), renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
+    if (failure === "compile") gl.getShaderParameter = () => false;
+    if (failure === "link") gl.getProgramParameter = () => false;
+    if (failure === "texture") gl.createTexture = () => null;
+    if (failure === "buffer") gl.createBuffer = () => null;
+    assert.throws(() => renderer.render(new GameBoy(makeROM()), preset, camera, "2.5d", true),
+      /failed|ressources de lissage/);
+    const allocated = renderer.resources.length;
+    renderer.dispose();
+    assert.equal(gl.deleted.length, allocated);
+    assert.equal(renderer.resources.length, 0);
+  }
 });
 
 test("unsupported WebGL, bad shaders, context loss and invalid camera surface errors", () => {

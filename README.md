@@ -132,6 +132,19 @@ Le preset `preset/pokemon-red.js` cible **Rouge France, revision 0**, titre `POK
 
 Pour etendre la 3D detaillee, ajouter un lieu reconnu et ses objets semantiques dans ce preset, puis verifier ses entrees, ses meubles, les dialogues et le suivi de camera. Les ROM et les plans graphiques extraits ne sont pas livres avec l'application.
 
+### Filtres shaders optionnels
+
+La case **Activer le shader**, a cote du choix de rendu, active un post-traitement WebGL en 2D/2.5D/3D. Desactive par defaut, il propose quatre filtres dans **Filtre** ; changer ce choix active immediatement le shader :
+
+- **Lissage leger (FXAA)** : filtrage directionnel des contours contrastes.
+- **Arrondi des sprites** : détecte les coins de pixels contrastés (méthode EPX) et ne coupe que ces coins, sans mélanger les couleurs. Les zones unies et les dégradés restent intacts, les contours des sprites deviennent arrondis.
+- **Nettete** : renforcement des contours par masque de contraste ; peut produire des halos sur les contours tres contrastes.
+- **CRT retro** : lignes de balayage, masque RGB, leger adoucissement et vignettage, sans deformation de l'image.
+
+En 2.5D/3D, les dialogues et le menu Start sont dessines apres le filtre et restent nets ; les ecrans plein cadre non reconnus ne sont pas filtres. En 2D, toutes les ROM sont compatibles sans preset : l'image entiere est filtree, textes inclus, a chaque rafraichissement. Decochez la case pour retrouver exactement les pixels originaux. Les captures PNG restent les images originales de 160 x 144 pixels.
+
+Le changement est immediat, y compris en pause, sans modifier la partie ou les sauvegardes. Le choix dure pendant la page courante, sans stockage persistant. Une texture ecran et une passe GPU supplementaires sont utilisees seulement lorsque le filtre est actif ; les ressources sont creees a la premiere activation puis reutilisees jusqu'a la destruction du renderer. Cela ajoute un cout GPU, pas une garantie de gain de performances. Les erreurs WebGL sont signalees et retablissent le rendu 2D.
+
 ### Application installable et hors ligne
 
 Sous **HTTPS ou localhost**, le lecteur prepare automatiquement ses fichiers pour une utilisation hors ligne. Attendez le message **Application prete hors ligne** avant de couper la connexion. Installez-le avec le bouton propose par les navigateurs compatibles, ou depuis leur menu (sur iOS : Partager puis Sur l'ecran d'accueil). La disponibilite de l'installation depend du navigateur ; le lecteur reste utilisable sans installation.

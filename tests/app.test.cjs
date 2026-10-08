@@ -93,7 +93,8 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketGraphics: Graphics,
     PocketPresets: [AladdinPreset, CrystalPreset, RedPreset],
     PocketScene: { ...Scene, Renderer: class {
-      render(game, preset, camera, mode) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneMode = mode; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360 }; }
+      render2D(game, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.filtered2D = (scope.filtered2D || 0) + 1; return { smoothed: true }; }
+      render(game, preset, camera, mode, smoothing, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.sceneMode = mode; scope.sceneSmoothing = smoothing; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360, smoothed: smoothing }; }
       dispose() { scope.sceneDisposed = true; }
     } },
     Uint8Array, AudioContext, ImageData: class { constructor(data) { this.data = data; } },
@@ -281,6 +282,65 @@ test("2.5D is opt-in and switches back to original 2D without restarting or muta
   assert.equal(h.pending.size, 1);
 });
 
+test("contour smoothing is optional, updates paused scenes and never changes game state or original 2D", async () => {
+  const h = harness();
+  await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("stopLoop(); paused = true; emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  assert.equal(h.element("#scene-smoothing").checked, false);
+  const game = h.evaluate("emulator"), before = States.capture(game, "0".repeat(64));
+  h.element("#scene-smoothing").checked = true;
+  h.element("#scene-smoothing").fire("change");
+  assert.equal(h.scope.filtered2D, 1);
+  assert.equal(h.element("#scene-canvas").hidden, false);
+  assert.match(h.element("#scene-status").textContent, /image entière filtrée/);
+  h.element("#render-mode").value = "2.5d"; h.element("#render-mode").fire("change");
+  assert.equal(h.scope.sceneSmoothing, true);
+  assert.match(h.element("#scene-status").textContent, /contours lissés/);
+  const renders = h.scope.sceneRenders;
+  h.element("#scene-smoothing").checked = false; h.element("#scene-smoothing").fire("change");
+  assert.equal(h.scope.sceneSmoothing, false);
+  assert.equal(h.scope.sceneRenders, renders + 1);
+  assert.doesNotMatch(h.element("#scene-status").textContent, /contours lissés/);
+  h.element("#render-mode").value = "2d"; h.element("#render-mode").fire("change");
+  assert.equal(h.element("#scene-canvas").hidden, true);
+  const after = States.capture(game, "0".repeat(64)); after.createdAt = before.createdAt;
+  assert.deepEqual(after, before);
+  assert.equal(h.evaluate("paused"), true);
+});
+test("shader selector activates all filters in 2D and preserves the choice in perspective modes", async () => {
+  const h = harness();
+  await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("stopLoop(); paused = true; emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  assert.equal(h.element("#scene-filter").value, "light");
+  for (const filter of ["light", "soft", "sharp", "crt"]) {
+    h.element("#scene-filter").value = filter; h.element("#scene-filter").fire("change");
+    assert.equal(h.element("#scene-smoothing").checked, true);
+    assert.equal(h.scope.sceneFilter, filter);
+    assert.match(h.element("#scene-status").textContent, /shader/);
+  }
+  h.element("#render-mode").value = "2.5d"; h.element("#render-mode").fire("change");
+  assert.equal(h.scope.sceneFilter, "crt");
+  h.element("#scene-smoothing").checked = false; h.element("#scene-smoothing").fire("change");
+  assert.equal(h.scope.sceneSmoothing, false);
+});
+test("2D smoothing works without presets, follows every draw and reports GPU errors without retry loops", async () => {
+  const h = harness();
+  await load(h, "test.gb", makeROM({ program: [0x18, 0xfe] }));
+  assert.equal(h.element("#scene-option").disabled, true);
+  h.element("#scene-smoothing").checked = true; h.element("#scene-smoothing").fire("change");
+  assert.equal(h.scope.filtered2D, 1);
+  assert.equal(h.evaluate("emulator.videoLayers()"), null);
+  h.evaluate("draw(); draw()");
+  assert.equal(h.scope.filtered2D, 3);
+  h.scope.failScene = true;
+  h.evaluate("draw()");
+  assert.equal(h.element("#scene-smoothing").checked, false);
+  assert.equal(h.element("#scene-canvas").hidden, true);
+  assert.match(h.element("#scene-status").textContent, /Filtre 2D arrêté.*WebGL failed/);
+  assert.equal(h.errors.length, 1);
+  h.evaluate("draw()");
+  assert.equal(h.errors.length, 1);
+});
 test("automatic 2.5D rendering is capped at 30 Hz and stops work in original 2D", async () => {
   const h = harness();
   let time = 0;

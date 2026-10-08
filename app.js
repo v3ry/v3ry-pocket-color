@@ -486,6 +486,9 @@ function sceneMessage(message, error = false) {
   sceneStatus.classList.toggle("is-error", error);
   if (error) showFullscreenMessage(message, true);
 }
+function shaderLabel() {
+  return { light: "Lissage léger", soft: "Arrondi des sprites", sharp: "Netteté", crt: "CRT rétro" }[document.querySelector("#scene-filter").value];
+}
 function cameraControls() {
   for (const key of ["yaw", "pitch", "zoom", "thickness", "light"]) {
     const percent = key === "zoom" || key === "light";
@@ -526,6 +529,27 @@ function updateScene(force = false) {
     else sceneMessage(`Preset disponible : ${scenePreset.name}. Choisissez le rendu 2.5D${scenePreset.world ? " ou 3D" : ""} pour l’activer.`);
     force = true;
   }
+  if (renderMode.value === "2d") {
+    emulator?.setVideoCapture(false);
+    if (!emulator || !document.querySelector("#scene-smoothing").checked) {
+      sceneCanvas.hidden = true;
+      sceneCanvas.setAttribute("aria-hidden", "true");
+      return;
+    }
+    try {
+      if (!sceneRenderer) sceneRenderer = new PocketScene.Renderer(sceneCanvas);
+      sceneRenderer.render2D(emulator, document.querySelector("#scene-filter").value);
+      sceneCanvas.hidden = false;
+      sceneCanvas.setAttribute("aria-hidden", "false");
+      sceneMessage(`2D · shader ${shaderLabel()} · image entière filtrée, textes inclus · jeu et sauvegardes inchangés.`);
+    } catch (error) {
+      if (sceneRenderer) { sceneRenderer.dispose(); sceneRenderer = null; }
+      document.querySelector("#scene-smoothing").checked = false;
+      returnTo2D(`Filtre 2D arrêté : ${error.message} Retour aux pixels originaux.`, true);
+      console.error(error);
+    }
+    return;
+  }
   if (!["2.5d", "3d"].includes(renderMode.value)) return;
   if (!emulator || !scenePreset) {
     returnTo2D("Rendu 2.5D indisponible : aucun preset compatible avec le jeu chargé.", true);
@@ -541,23 +565,41 @@ function updateScene(force = false) {
   try {
     emulator.setVideoCapture(true);
     if (!sceneRenderer) sceneRenderer = new PocketScene.Renderer(sceneCanvas);
-    const result = sceneRenderer.render(emulator, scenePreset, sceneCamera, renderMode.value);
+    const result = sceneRenderer.render(emulator, scenePreset, sceneCamera, renderMode.value,
+      document.querySelector("#scene-smoothing").checked, document.querySelector("#scene-filter").value);
     sceneCanvas.hidden = false;
     sceneCanvas.setAttribute("aria-hidden", "false");
-    sceneMessage(`${scenePreset.name} · ${result.detail || `${result.tiles} tuiles`} · rendu ≤30 Hz · jeu et sauvegardes inchangés.`);
+    sceneMessage(`${scenePreset.name} · ${result.detail || `${result.tiles} tuiles`}${result.smoothed ? ` · contours lissés / shader ${shaderLabel()}` : ""} · rendu ≤30 Hz · jeu et sauvegardes inchangés.`);
   } catch (error) {
     if (sceneRenderer) { sceneRenderer.dispose(); sceneRenderer = null; }
+    document.querySelector("#scene-smoothing").checked = false;
     returnTo2D(`Rendu 2.5D arrêté : ${error.message} Retour au rendu 2D.`, true);
     console.error(error);
   }
 }
 renderMode.value = "2d";
+document.querySelector("#scene-smoothing").checked = false;
+document.querySelector("#scene-filter").value = "light";
+document.querySelector("#scene-filter").addEventListener("change", () => {
+  document.querySelector("#scene-smoothing").checked = true;
+  updateScene(true);
+  canvas.focus();
+});
+document.querySelector("#scene-smoothing").addEventListener("change", () => {
+  updateScene(true);
+  if (renderMode.value === "2d" && !document.querySelector("#scene-smoothing").checked
+    && !sceneStatus.classList.contains("is-error")) sceneMessage("Rendu 2D original rétabli, sans filtre.");
+  canvas.focus();
+});
 renderMode.addEventListener("change", () => {
   if (!["2d", "2.5d", "3d"].includes(renderMode.value)) {
     returnTo2D("Mode de rendu invalide. Retour au rendu 2D.", true);
     return;
   }
-  if (renderMode.value === "2d") returnTo2D("Rendu 2D original rétabli, sans redémarrage de la partie.");
+  if (renderMode.value === "2d") {
+    returnTo2D("Rendu 2D original rétabli, sans redémarrage de la partie.");
+    updateScene(true);
+  }
   else updateScene(true);
   canvas.focus();
 });
@@ -583,6 +625,7 @@ document.querySelector("#scene-reset").addEventListener("click", () => {
 sceneCanvas.addEventListener("webglcontextlost", event => {
   event.preventDefault();
   if (sceneRenderer) { sceneRenderer.dispose(); sceneRenderer = null; }
+  document.querySelector("#scene-smoothing").checked = false;
   returnTo2D("Contexte WebGL perdu : rendu 2D rétabli. Réessayez la 2.5D après restauration du contexte.", true);
 });
 
