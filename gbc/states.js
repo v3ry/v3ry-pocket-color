@@ -3,9 +3,11 @@
 
   const FORMAT = "v3ry-pocket-color-state";
   const MAX_SIZE = 4 * 1024 * 1024;
+  const CAMERA_MAX_BUSY_CYCLES = 4 * (32446 + 512 + 16 * 65535);
   const MEMORY = ["vram", "wram", "oam", "io", "hram", "bgPalette", "objPalette", "pixels"];
   const CART_ARRAYS = ["ram", "rtc", "latchedRTC"];
-  const CART_EXCLUDE = new Set(["rom", "banks", "color", "title", "mapper", "type", "hasRTC", "saveRevision", ...CART_ARRAYS]);
+  const CART_EXCLUDE = new Set(["rom", "banks", "color", "title", "mapper", "type", "hasRTC", "saveRevision",
+    "isCamera", "cameraRegisters", "cameraCaptureProvider", "cameraBusyCycles", ...CART_ARRAYS]);
   const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "apu", "color", ...MEMORY]);
   const APU_EXCLUDE = new Set(["registers", "channels", "samples", "highpass"]);
 
@@ -39,13 +41,17 @@
     if (!/^[0-9a-f]{64}$/.test(romKey)) throw new Error("Identite ROM invalide.");
     if (game.cartridge.hasRTC) game.cartridge.updateRTC();
     return {
-      format: FORMAT, version: 2, romKey, createdAt: Date.now(), color: game.color,
+      format: FORMAT, version: 3, romKey, createdAt: Date.now(), color: game.color,
       cpu: scalarCopy(game.cpu, new Set(["bus"])),
       machine: scalarCopy(game, MACHINE_EXCLUDE),
       memory: Object.fromEntries(MEMORY.map(key => [key, Array.from(game[key])])),
       cartridge: {
         type: game.cartridge.type,
         scalars: scalarCopy(game.cartridge, CART_EXCLUDE),
+        camera: game.cartridge.isCamera ? {
+          registers: Array.from(game.cartridge.cameraRegisters),
+          busyCycles: game.cartridge.cameraBusyCycles,
+        } : null,
         ...Object.fromEntries(CART_ARRAYS.map(key => [key, Array.from(game.cartridge[key])])),
       },
       audio: {
@@ -57,7 +63,7 @@
     };
   }
   function restore(game, data, romKey) {
-    if (!data || data.format !== FORMAT || ![1, 2].includes(data.version)) throw new Error("Format ou version de sauvegarde d'etat incompatible.");
+    if (!data || data.format !== FORMAT || ![1, 2, 3].includes(data.version)) throw new Error("Format ou version de sauvegarde d'etat incompatible.");
     if (data.romKey !== romKey || data.color !== game.color || data.cartridge?.type !== game.cartridge.type) {
       throw new Error("Cet etat appartient a une autre ROM. Chargez exactement le meme jeu.");
     }
@@ -90,6 +96,18 @@
     for (const [key, max] of Object.entries({ bank: 511, highBank: 3, ramBank: 255, mode: 1, latch: 255 })) {
       integer(cart[key], 0, max);
     }
+    let cameraRegisters = null, cameraBusyCycles = 0;
+    if (data.version === 3) {
+      if (game.cartridge.isCamera) {
+        const camera = data.cartridge.camera;
+        if (!camera || typeof camera !== "object" || Array.isArray(camera) || Object.keys(camera).length !== 2) {
+          throw new Error("État de la Game Boy Camera invalide.");
+        }
+        cameraRegisters = byteArray(camera.registers, game.cartridge.cameraRegisters.length);
+        integer(camera.busyCycles, 0, CAMERA_MAX_BUSY_CYCLES);
+        cameraBusyCycles = camera.busyCycles;
+      } else if (data.cartridge.camera !== null) throw new Error("État caméra incompatible avec cette cartouche.");
+    }
     integer(cart.lastRTC, 0, Number.MAX_SAFE_INTEGER);
     for (const key of CART_ARRAYS) byteArray(data.cartridge[key], game.cartridge[key].length);
     for (const key of ["rtc", "latchedRTC"]) {
@@ -120,6 +138,10 @@
     for (const key of MEMORY) game[key].set(data.memory[key]);
     Object.assign(game.cartridge, cart);
     for (const key of CART_ARRAYS) game.cartridge[key].set(data.cartridge[key]);
+    if (game.cartridge.isCamera && cameraRegisters) {
+      game.cartridge.cameraRegisters.set(cameraRegisters);
+      game.cartridge.cameraBusyCycles = cameraBusyCycles;
+    }
     // A state rewinds the RTC; elapsed wall time is not applied to the restored instant.
     if (game.cartridge.hasRTC) game.cartridge.lastRTC = Date.now();
     game.cartridge.saveRevision++;

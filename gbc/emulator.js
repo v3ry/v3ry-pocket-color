@@ -342,6 +342,7 @@
       this.statLine = !!active;
     }
     tick(cycles) {
+      if (this.cartridge.isCamera) this.cartridge.tick(cycles);
       let baseCycles = 0;
       for (let i = 0; i < cycles; i++) {
         if (this.dmaActive) {

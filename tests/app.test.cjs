@@ -56,6 +56,23 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   canvas.getContext = () => context;
   canvas.toDataURL = () => "data:image/png;base64,AAAA";
   canvas.toBlob = callback => callback(new Blob(["png"], { type: "image/png" }));
+  const cameraVideo = element("#camera-video");
+  cameraVideo.readyState = 2; cameraVideo.videoWidth = 320; cameraVideo.videoHeight = 240;
+  cameraVideo.play = async () => {};
+  cameraVideo.pause = () => {};
+  const cameraPixels = new Uint8ClampedArray(128 * 120 * 4).fill(128);
+  const cameraCanvas = element("#camera-capture");
+  cameraCanvas.getContext = () => ({
+    drawImage() {},
+    getImageData() { return { data: cameraPixels }; },
+  });
+  const cameraCalls = [], cameraTracks = [];
+  const mediaDevices = { async getUserMedia(constraints) {
+    cameraCalls.push(constraints);
+    const track = { stopped: false, stop() { this.stopped = true; } };
+    cameraTracks.push(track);
+    return { getTracks: () => [track] };
+  } };
   for (const name of ["preview", "tiles", "map0", "map1", "objects", "palettes"]) {
     const target = element(`#graphics-${name}`);
     target.getContext = () => ({ putImageData: image => { target.image = image; } });
@@ -97,7 +114,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     }
   }
   const scope = vm.createContext({
-    document, window, navigator: { getGamepads: () => [] }, performance,
+    document, window, navigator: { getGamepads: () => [], mediaDevices }, performance,
     PocketGameBoy: GameBoy, PocketGameBoyAdvance: GameBoyAdvance, PocketZIP: ZIP,
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
@@ -124,7 +141,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     callback(time);
   };
   const evaluate = expression => vm.runInContext(expression, scope);
-  return { element, evaluate, window, document, preferences, errors, pending, scope, store, intervals, downloads, created, audioBuffers, audioStarts };
+  return { element, evaluate, window, document, preferences, errors, pending, scope, store, intervals, downloads, created, audioBuffers, audioStarts, cameraCalls, cameraTracks };
 }
 function file(name, bytes) {
   return { name, size: bytes.length, arrayBuffer: async () => bytes.slice().buffer };
@@ -203,6 +220,31 @@ test("GBA sound button activates scheduled stereo Web Audio output", async () =>
   assert.equal(h.audioStarts.length, 1);
   await h.element("#sound-button").fire("click");
   assert.equal(h.evaluate("audioContext.state"), "suspended");
+});
+
+test("Game Boy Camera requests webcam access on load, keeps it on reset and stops it when leaving", async () => {
+  const h = harness();
+  const cameraROM = makeROM({ type: 0xfc, ramSize: 4 });
+  await load(h, "camera.gb", cameraROM);
+  assert.equal(h.element("#camera-panel").hidden, false);
+  assert.equal(h.cameraCalls.length, 1);
+  assert.match(h.element("#camera-status").textContent, /Webcam prête/);
+  assert.equal(h.element("#camera-video").hidden, false);
+  assert.equal(h.cameraCalls[0].video, true);
+  assert.equal(h.cameraCalls[0].audio, false);
+  assert.equal(h.evaluate("emulator.cartridge.cameraCaptureProvider().length"), 128 * 120 * 4);
+  await h.element("#camera-button").fire("click");
+  assert.equal(h.cameraTracks[0].stopped, true);
+  await h.element("#camera-button").fire("click");
+  assert.equal(h.cameraCalls.length, 2);
+  await load(h, "camera-reset.gb", cameraROM);
+  assert.equal(h.cameraCalls.length, 2);
+  assert.equal(h.cameraTracks[1].stopped, false);
+  assert.equal(h.element("#camera-video").hidden, false);
+  assert.equal(h.evaluate("emulator.cartridge.cameraCaptureProvider().length"), 128 * 120 * 4);
+  await load(h, "ordinary.gb", makeDemoROM(false));
+  assert.equal(h.element("#camera-panel").hidden, true);
+  assert.equal(h.cameraTracks[1].stopped, true);
 });
 
 test("GBA shoulders, gamepad controls and legacy keyboard preferences preserve GB bindings", async () => {

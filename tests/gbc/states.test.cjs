@@ -67,7 +67,7 @@ test("wrong ROM, version and corrupt snapshots are rejected without mutation", a
   const before = States.capture(destination, key);
   for (const corrupt of [
     data => { data.romKey = "0".repeat(64); },
-    data => { data.version = 3; },
+    data => { data.version = 4; },
     data => { data.memory.vram.pop(); },
     data => { data.memory.pixels[0] = -1; },
     data => { data.cpu.pc = 65536; },
@@ -109,7 +109,7 @@ test("states preserve the early LY reset while the PPU is still on VBlank line 1
   assert.equal(restored.mode(), 2);
 });
 
-test("version 2 states preserve an in-progress OAM DMA and variable mode 3 timing", () => {
+test("version 3 states preserve an in-progress OAM DMA and variable mode 3 timing", () => {
   const rom = makeROM({ color: true }), key = "0".repeat(64);
   const game = new GameBoy(rom), restored = new GameBoy(rom);
   game.io[0x43] = 5;
@@ -118,7 +118,7 @@ test("version 2 states preserve an in-progress OAM DMA and variable mode 3 timin
   game.write(0xff46, 0xc0);
   game.tick(39);
   const state = States.capture(game, key);
-  assert.equal(state.version, 2);
+  assert.equal(state.version, 3);
   States.restore(restored, state, key);
   assert.equal(restored.mode3End, 257);
   assert.equal(restored.dmaIndex, 9);
@@ -129,6 +129,32 @@ test("version 2 states preserve an in-progress OAM DMA and variable mode 3 timin
   assert.equal(restored.dmaActive, false);
   assert.deepEqual(game.pixels, restored.pixels);
   assert.equal(game.apu.frameStep, restored.apu.frameStep);
+});
+
+test("camera states preserve capture registers, busy timing and captured RAM", () => {
+  const rom = makeROM({ type: 0xfc, ramSize: 4 }), key = "0".repeat(64);
+  const game = new GameBoy(rom), restored = new GameBoy(rom);
+  game.cartridge.cameraRegisters.set(Array.from({ length: 0x36 }, (_, index) => index));
+  game.cartridge.cameraBusyCycles = 1234;
+  game.cartridge.ram[0x100] = 0x5a;
+  const state = States.capture(game, key);
+  States.restore(restored, state, key);
+  assert.deepEqual(restored.cartridge.cameraRegisters, game.cartridge.cameraRegisters);
+  assert.equal(restored.cartridge.cameraBusyCycles, 1234);
+  assert.equal(restored.cartridge.ram[0x100], 0x5a);
+  assert.equal(restored.cartridge.cameraCaptureProvider, null);
+});
+
+test("legacy version 2 states remain restorable without camera metadata", () => {
+  const rom = makeROM({ color: true }), key = "0".repeat(64);
+  const original = new GameBoy(rom), restored = new GameBoy(rom);
+  original.tick(456 * 10);
+  const state = States.capture(original, key);
+  state.version = 2;
+  delete state.cartridge.camera;
+  States.restore(restored, state, key);
+  assert.equal(restored.ly, original.ly);
+  assert.equal(restored.dot, original.dot);
 });
 
 test("legacy version 1 states migrate without modifying the input or inventing an active DMA", () => {

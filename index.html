@@ -117,6 +117,16 @@
           <button id="quick-load" class="immersive-only" type="button" disabled>Charger · F8</button>
           <label class="volume-control" for="volume">Volume <input id="volume" type="range" min="0" max="100" value="70"><output id="volume-value" for="volume">70 %</output></label>
         </div>
+        <section id="camera-panel" class="camera-panel" aria-label="Game Boy Camera" hidden>
+          <video id="camera-video" class="camera-preview" autoplay muted playsinline hidden aria-label="Aperçu de la webcam"></video>
+          <div class="camera-panel-copy">
+            <p class="eyebrow">GAME BOY CAMERA</p>
+            <p>Le navigateur demande l’accès webcam pour cette cartouche. Le flux reste sur cet appareil, et le jeu ne capture une image qu’à sa demande.</p>
+            <button id="camera-button" type="button">Activer la webcam</button>
+            <p id="camera-status" class="status-message" role="status" aria-live="polite">La webcam est désactivée.</p>
+          </div>
+        </section>
+        <canvas id="camera-capture" width="128" height="120" hidden></canvas>
         <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
         <p class="status-message" id="console-status" role="status" hidden>GBA expérimentale : audio PSG et Direct Sound disponibles ; états, shaders et 3D non disponibles. Sauvegardes SRAM, Flash et EEPROM prises en charge. Certains services BIOS ne sont pas implémentés ; une erreur arrête explicitement l’émulation.</p>
         <p id="comfort-status" class="status-message" role="status" aria-live="polite">Vitesse normale. Le son est coupé pendant l’avance rapide.</p>

@@ -7,8 +7,11 @@
     [0x05, "MBC2"], [0x06, "MBC2"],
     [0x0f, "MBC3"], [0x10, "MBC3"], [0x11, "MBC3"], [0x12, "MBC3"], [0x13, "MBC3"],
     [0x19, "MBC5"], [0x1a, "MBC5"], [0x1b, "MBC5"], [0x1c, "MBC5"], [0x1d, "MBC5"], [0x1e, "MBC5"],
+    [0xfc, "Camera"],
   ]);
   const RAM_SIZES = [0, 2048, 8192, 32768, 131072, 65536];
+  const CAMERA_WIDTH = 128, CAMERA_SENSOR_HEIGHT = 120, CAMERA_HEIGHT = 112;
+  const CAMERA_IMAGE_OFFSET = 0x100;
 
   class Cartridge {
     constructor(bytes) {
@@ -27,6 +30,7 @@
       this.mapper = TYPES.get(this.type);
       if (!this.mapper) throw new Error(`Cartouche non prise en charge : type 0x${this.type.toString(16)}.`);
       if (RAM_SIZES[bytes[0x149]] === undefined) throw new Error("Taille de RAM inconnue.");
+      this.isCamera = this.mapper === "Camera";
       this.rom = bytes;
       this.banks = banks;
       this.color = !!(bytes[0x143] & 0x80);
@@ -45,6 +49,9 @@
       this.latch = 0;
       this.lastRTC = Date.now();
       this.saveRevision = 0;
+      this.cameraRegisters = new Uint8Array(0x36);
+      this.cameraCaptureProvider = null;
+      this.cameraBusyCycles = 0;
     }
     readROM(address) {
       let bank = 0;
@@ -62,6 +69,12 @@
         }
         return;
       }
+      if (this.mapper === "Camera") {
+        if (address < 0x2000) this.ramEnabled = (value & 15) === 10;
+        else if (address < 0x4000) this.bank = value & 0x3f;
+        else if (address < 0x6000) this.ramBank = value & 0x1f;
+        return;
+      }
       if (address < 0x2000) this.ramEnabled = (value & 15) === 10;
       else if (address < 0x4000) {
         if (this.mapper === "MBC5") {
@@ -77,6 +90,68 @@
         }
         this.latch = value;
       }
+    }
+    setCameraCaptureProvider(provider) {
+      if (provider !== null && typeof provider !== "function") {
+        throw new TypeError("La source de capture de la Game Boy Camera doit être une fonction.");
+      }
+      this.cameraCaptureProvider = provider;
+    }
+    cameraRegister(address) {
+      const index = address & 0x7f;
+      if (index === 0) return (this.cameraRegisters[0] & 6) | (this.cameraBusyCycles ? 1 : 0);
+      return 0;
+    }
+    writeCameraRegister(address, value) {
+      const index = address & 0x7f;
+      if (index >= this.cameraRegisters.length) return;
+      if (index === 0) {
+        this.cameraRegisters[0] = value & 6;
+        if (value & 1) this.captureCameraImage();
+        else this.cameraBusyCycles = 0;
+        return;
+      }
+      this.cameraRegisters[index] = value;
+    }
+    captureCameraImage() {
+      if (!this.cameraCaptureProvider) {
+        throw new Error("Game Boy Camera : activez la webcam avant de prendre une photo.");
+      }
+      const pixels = this.cameraCaptureProvider();
+      if (!(pixels instanceof Uint8ClampedArray)
+        || pixels.length !== CAMERA_WIDTH * CAMERA_SENSOR_HEIGHT * 4) {
+        throw new Error("Game Boy Camera : image webcam invalide (128 × 120 pixels requis).");
+      }
+
+      const exposure = this.cameraRegisters[2] * 256 + this.cameraRegisters[3];
+      const invert = !!(this.cameraRegisters[4] & 8);
+      const base = CAMERA_IMAGE_OFFSET;
+      this.ram.fill(0, base, base + CAMERA_WIDTH * CAMERA_HEIGHT / 4);
+      for (let y = 0; y < CAMERA_HEIGHT; y++) {
+        for (let x = 0; x < CAMERA_WIDTH; x++) {
+          const source = ((y + 4) * CAMERA_WIDTH + x) * 4;
+          let value = Math.round((pixels[source] * 299 + pixels[source + 1] * 587 + pixels[source + 2] * 114) / 1000);
+          value = Math.max(0, Math.min(255, 128 + (value * exposure / 0x300 - 128) / 8));
+          if (invert) value = 255 - value;
+
+          const matrix = 6 + ((y & 3) * 4 + (x & 3)) * 3;
+          let shade = 0;
+          if (value >= this.cameraRegisters[matrix]) shade = 1;
+          if (value >= this.cameraRegisters[matrix + 1]) shade = 2;
+          if (value >= this.cameraRegisters[matrix + 2]) shade = 3;
+          const color = 3 - shade;
+          const tile = base + ((y >>> 3) * 16 + (x >>> 3)) * 16 + (y & 7) * 2;
+          const bit = 1 << (7 - (x & 7));
+          if (color & 1) this.ram[tile] |= bit;
+          if (color & 2) this.ram[tile + 1] |= bit;
+        }
+      }
+      const nBit = this.cameraRegisters[1] & 0x80;
+      this.cameraBusyCycles = 4 * (32446 + (nBit ? 0 : 512) + 16 * exposure);
+      this.saveRevision++;
+    }
+    tick(cycles) {
+      if (this.cameraBusyCycles) this.cameraBusyCycles = Math.max(0, this.cameraBusyCycles - cycles);
     }
     updateRTC() {
       const now = Date.now();
@@ -101,6 +176,11 @@
       return (bank * 8192 + (address & 8191)) % this.ram.length;
     }
     readRAM(address) {
+      if (this.mapper === "Camera") {
+        if (this.ramBank & 0x10) return this.cameraRegister(address);
+        if (this.cameraBusyCycles) return 0;
+        return this.ram.length ? this.ram[this.ramOffset(address)] : 255;
+      }
       if (!this.ramEnabled) return 255;
       if (this.mapper === "MBC3" && this.ramBank >= 8 && this.ramBank <= 12) {
         if (!this.hasRTC) return 255;
@@ -113,6 +193,16 @@
       return this.mapper === "MBC2" ? value | 0xf0 : value;
     }
     writeRAM(address, value) {
+      if (this.mapper === "Camera") {
+        if (this.ramBank & 0x10) { this.writeCameraRegister(address, value); return; }
+        if (!this.ramEnabled || this.cameraBusyCycles || !this.ram.length) return;
+        const offset = this.ramOffset(address);
+        if (this.ram[offset] !== value) {
+          this.ram[offset] = value;
+          this.saveRevision++;
+        }
+        return;
+      }
       if (!this.ramEnabled) return;
       if (this.mapper === "MBC3" && this.ramBank >= 8 && this.ramBank <= 12) {
         if (this.hasRTC) {

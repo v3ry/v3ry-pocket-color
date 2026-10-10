@@ -475,6 +475,40 @@ body.is-immersive {
   margin: 5px 0 18px;
 }
 
+.camera-panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid #d8e1d5;
+  border-radius: 8px;
+  background: #f5f8f1;
+}
+.camera-panel[hidden] { display: none; }
+.camera-panel-copy { min-width: 0; }
+.camera-panel-copy .eyebrow { margin: 0 0 4px; font-size: 10px; }
+.camera-panel-copy > p:not(.eyebrow) { margin: 0 0 8px; font-size: 11px; line-height: 1.5; }
+.camera-panel button {
+  padding: 8px 12px;
+  color: var(--dark-green);
+  border: 1px solid #b9c8b9;
+  border-radius: 7px;
+  background: #eaf0e8;
+  cursor: pointer;
+  font-size: 11px;
+}
+.camera-preview {
+  width: 128px;
+  height: 120px;
+  flex: 0 0 auto;
+  border: 1px solid #b9c8b9;
+  border-radius: 5px;
+  object-fit: cover;
+  background: #18231b;
+}
+.camera-panel .status-message { margin: 6px 0 0; }
+
 .player-actions button,
 .settings button,
 .archive-picker button,

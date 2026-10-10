@@ -17,6 +17,12 @@ const fullscreenButton = document.querySelector("#fullscreen-button");
 const fullscreenStatus = document.querySelector("#fullscreen-status");
 const volumeInput = document.querySelector("#volume");
 const volumeValue = document.querySelector("#volume-value");
+const cameraPanel = document.querySelector("#camera-panel");
+const cameraVideo = document.querySelector("#camera-video");
+const cameraButton = document.querySelector("#camera-button");
+const cameraStatus = document.querySelector("#camera-status");
+const cameraCaptureContext = document.querySelector("#camera-capture")
+  .getContext("2d", { willReadFrequently: true });
 const keyAction = document.querySelector("#key-action");
 const bindKeyButton = document.querySelector("#bind-key");
 const keyStatus = document.querySelector("#key-status");
@@ -85,6 +91,7 @@ let cycleDebt = 0;
 let paused = false;
 let audioContext = null;
 let audioGain = null;
+let cameraStream = null;
 let volume = 0.7;
 let bindingAction = null;
 let inputFocused = true;
@@ -652,6 +659,89 @@ function createEmulator(bytes, name) {
   return /\.gba$/i.test(name) ? new PocketGameBoyAdvance(bytes, audioContext?.sampleRate || 48000)
     : new PocketGameBoy(bytes, audioContext?.sampleRate || 48000);
 }
+function stopMediaStream(stream) {
+  if (stream) for (const track of stream.getTracks()) track.stop();
+}
+function setCameraStatus(message, error = false) {
+  cameraStatus.textContent = message;
+  cameraStatus.classList.toggle("is-error", error);
+}
+function captureCameraFrame(game, stream) {
+  if (emulator !== game || cameraStream !== stream || cameraVideo.readyState < 2
+    || !cameraVideo.videoWidth || !cameraVideo.videoHeight) {
+    throw new Error("Webcam indisponible au moment de la capture. Réactivez-la puis redémarrez le jeu.");
+  }
+  const aspect = 128 / 120, width = cameraVideo.videoWidth, height = cameraVideo.videoHeight;
+  let sx = 0, sy = 0, sw = width, sh = height;
+  if (width / height > aspect) {
+    sw = height * aspect;
+    sx = (width - sw) / 2;
+  } else {
+    sh = width / aspect;
+    sy = (height - sh) / 2;
+  }
+  cameraCaptureContext.drawImage(cameraVideo, sx, sy, sw, sh, 0, 0, 128, 120);
+  return cameraCaptureContext.getImageData(0, 0, 128, 120).data;
+}
+function attachCameraProvider(game, stream = cameraStream) {
+  if (stream && game?.cartridge.isCamera) {
+    game.cartridge.setCameraCaptureProvider(() => captureCameraFrame(game, stream));
+  }
+}
+function stopCamera() {
+  if (emulator?.cartridge.isCamera) emulator.cartridge.setCameraCaptureProvider(null);
+  stopMediaStream(cameraStream);
+  cameraStream = null;
+  cameraVideo.pause();
+  cameraVideo.srcObject = null;
+  cameraVideo.hidden = true;
+  cameraButton.textContent = "Activer la webcam";
+  setCameraStatus("La webcam est désactivée.");
+}
+async function requestCamera(target, version) {
+  if (!target?.cartridge.isCamera) return false;
+  if (cameraStream) {
+    attachCameraProvider(target);
+    return true;
+  }
+  cameraButton.disabled = true;
+  let stream = null;
+  try {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.getUserMedia) throw new Error("Accès webcam indisponible. Ouvrez l’émulateur via HTTPS ou localhost.");
+    stream = await mediaDevices.getUserMedia.call(mediaDevices, { video: true, audio: false });
+    if (target !== emulator || version !== loadVersion) {
+      stopMediaStream(stream);
+      return false;
+    }
+    cameraVideo.srcObject = stream;
+    await cameraVideo.play();
+    if (target !== emulator || version !== loadVersion) {
+      stopMediaStream(stream);
+      cameraVideo.srcObject = null;
+      return false;
+    }
+    cameraStream = stream;
+    attachCameraProvider(target, stream);
+    cameraVideo.hidden = false;
+    cameraButton.textContent = "Désactiver la webcam";
+    setCameraStatus("Webcam prête. Le jeu ne capture une image qu’à sa demande.");
+    return true;
+  } catch (error) {
+    stopMediaStream(stream);
+    cameraVideo.srcObject = null;
+    cameraVideo.hidden = true;
+    setCameraStatus(`Webcam indisponible : ${error.message}`, true);
+    console.error(error);
+    return false;
+  } finally {
+    cameraButton.disabled = false;
+  }
+}
+async function toggleCamera() {
+  if (cameraStream) stopCamera();
+  else await requestCamera(emulator, loadVersion);
+}
 function consoleName(game = emulator) {
   return isGBA(game) ? "GAME BOY ADVANCE" : game?.color ? "GAME BOY COLOR" : "GAME BOY";
 }
@@ -669,6 +759,20 @@ function updateConsole() {
   soundButton.textContent = audioContext?.state === "running" ? "Couper le son" : "Activer le son";
   soundButton.setAttribute("aria-pressed", String(audioContext?.state === "running"));
   document.querySelector("#console-status").hidden = !gba;
+  cameraPanel.hidden = !emulator?.cartridge.isCamera;
+  cameraButton.disabled = false;
+  if (emulator?.cartridge.isCamera) {
+    if (cameraStream) {
+      attachCameraProvider(emulator);
+      cameraVideo.hidden = false;
+      cameraButton.textContent = "Désactiver la webcam";
+      setCameraStatus("Webcam prête. Le jeu ne capture une image qu’à sa demande.");
+    } else {
+      cameraVideo.hidden = true;
+      cameraButton.textContent = "Activer la webcam";
+      setCameraStatus("Demande d’accès à la webcam…");
+    }
+  }
   if (gba) stopAudio();
 }
 function draw() {
@@ -722,6 +826,7 @@ function startGame(bytes, name, version = loadVersion) {
     if (version !== loadVersion) return;
     transitioning = true;
     stopLoop();
+    if (!candidate.cartridge.isCamera) stopCamera();
     updateSaveButtons();
     pauseButton.disabled = true;
     let committed = false;
@@ -764,6 +869,7 @@ function startGame(bytes, name, version = loadVersion) {
       refreshStateSlot();
       refreshHistory();
       committed = true;
+      if (candidate.cartridge.isCamera && !cameraStream) await requestCamera(candidate, version);
       animation = requestAnimationFrame(run);
     } catch (error) {
       setSaveStatus(`Sauvegardes inaccessibles : ${error.message} Le jeu n’a pas été remplacé.`, true);
@@ -954,7 +1060,7 @@ saveInput.addEventListener("change", async () => {
   }
 });
 window.setInterval(saveCurrent, 1000);
-window.addEventListener("pagehide", saveCurrent);
+window.addEventListener("pagehide", () => { stopCamera(); saveCurrent(); });
 window.addEventListener("beforeunload", (event) => {
   if ((!stateMode && saveSession?.dirty) || importing || transitioning) {
     saveCurrent();
@@ -976,6 +1082,9 @@ function downloadFile(blob, name) {
 
 function activateRestored(candidate, session, fromState) {
   stopLoop();
+  if (candidate.cartridge.isCamera && cameraStream) {
+    attachCameraProvider(candidate);
+  } else if (!candidate.cartridge.isCamera) stopCamera();
   emulator = candidate;
   saveSession = session;
   stateMode = fromState;
@@ -1213,6 +1322,7 @@ soundButton.addEventListener("click", async () => {
     console.error(error);
   }
 });
+cameraButton.addEventListener("click", toggleCamera);
 
 function updateButton(index) {
   if (!isGBA() && index >= 8) return;

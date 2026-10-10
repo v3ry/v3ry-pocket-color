@@ -15,6 +15,43 @@ test("ROM validation rejects truncation, checksum and unsupported mappers", () =
   assert.throws(() => new Cartridge(makeROM().slice(0, 0x8000 - 1)), /tronquee/);
 });
 
+test("Game Boy Camera mapper exposes control registers and stores captured 2bpp tiles", () => {
+  const cart = new Cartridge(makeROM({ type: 0xfc, sizeCode: 2, ramSize: 4 }));
+  assert.equal(cart.isCamera, true);
+  cart.control(0x2000, 0); assert.equal(cart.readROM(0x4000), 0);
+  cart.control(0x2000, 2); assert.equal(cart.readROM(0x4000), 2);
+  cart.control(0, 10);
+  cart.control(0x4000, 0x10);
+  cart.writeRAM(0xa000, 6);
+  assert.equal(cart.readRAM(0xa080), 6);
+  for (let index = 6; index < 0x36; index += 3) {
+    cart.writeRAM(0xa000 + index, 64);
+    cart.writeRAM(0xa001 + index, 128);
+    cart.writeRAM(0xa002 + index, 192);
+  }
+  cart.writeRAM(0xa002, 3); cart.writeRAM(0xa003, 0);
+  const pixels = new Uint8ClampedArray(128 * 120 * 4).fill(128);
+  cart.setCameraCaptureProvider(() => pixels);
+  cart.writeRAM(0xa000, 1);
+  assert.equal(cart.readRAM(0xa000), 1);
+  assert.equal(cart.readRAM(0xa001), 0);
+  cart.control(0x4000, 0);
+  assert.equal(cart.readRAM(0xa100), 0);
+  cart.tick(cart.cameraBusyCycles);
+  assert.equal(cart.readRAM(0xa100), 0xff);
+  assert.equal(cart.readRAM(0xa101), 0);
+});
+
+test("Game Boy Camera requires an explicit image source and advances capture timing with the emulator", () => {
+  const cart = new Cartridge(makeROM({ type: 0xfc, ramSize: 4 }));
+  cart.control(0x4000, 0x10);
+  assert.throws(() => cart.writeRAM(0xa000, 1), /activez la webcam/);
+  const game = new GameBoy(makeROM({ type: 0xfc, ramSize: 4 }));
+  game.cartridge.cameraBusyCycles = 10;
+  game.tick(4);
+  assert.equal(game.cartridge.cameraBusyCycles, 6);
+});
+
 test("MBC1 ROM/RAM banking, mode and disabled RAM", () => {
   const cart = new Cartridge(makeROM({ type: 3, sizeCode: 5, ramSize: 3 }));
   assert.equal(cart.readROM(0x4000), 1);
