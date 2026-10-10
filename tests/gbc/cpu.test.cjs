@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { CPU } = require("../cpu.js");
+const { CPU } = require("../../gbc/cpu.js");
 
 function cpuWith(program) {
   const memory = new Uint8Array(65536);

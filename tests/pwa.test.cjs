@@ -20,7 +20,7 @@ function worker() {
     self: { registration: { scope }, clients: { async claim() {} }, addEventListener: (name, callback) => { events[name] = callback; } },
     caches: {
       async open() { return cache; },
-      async keys() { return ["unrelated-cache", ...Array.from({ length: 21 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`)]; },
+      async keys() { return ["unrelated-cache", ...Array.from({ length: 23 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`)]; },
       async delete(name) { deleted.push(name); },
     },
     async fetch(request) { network.push(request.url); return { network: true }; },
@@ -42,9 +42,22 @@ test("service worker precaches only existing application assets and serves offli
   for (const url of w.storage.keys()) assert.ok(fs.existsSync(path.join(__dirname, "..", new URL(url).pathname.slice("/pocket/".length))));
   assert.equal((await w.request(w.scope)).url, w.scope + "index.html");
   assert.equal((await w.request(w.scope + "app.js?version=1")).cached, true);
+  assert.equal((await w.request(w.scope + "gbc/emulator.js?version=1")).cached, true);
+  assert.equal((await w.request(w.scope + "gbc/preset/pokemon-red.js")).cached, true);
   assert.equal(w.network.length, 0);
   await w.lifecycle("activate");
-  assert.deepEqual(w.deleted, Array.from({ length: 21 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
+  assert.deepEqual(w.deleted, Array.from({ length: 22 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
+});
+
+test("offline cache includes every script referenced by the shared interface", async () => {
+  const w = worker();
+  await w.lifecycle("install");
+  for (const [, script] of source("index.html").matchAll(/<script src="([^"]+)"/g)) {
+    assert.ok(w.storage.has(new URL(script, w.scope).href), `Missing offline script: ${script}`);
+  }
+  for (const script of ["emulator.js", "scene.js", "preset/pokemon-red.js"]) {
+    assert.equal(await w.request(w.scope + script), null);
+  }
 });
 
 test("service worker never intercepts ROM, ZIP, saves, cross-origin or write requests", async () => {

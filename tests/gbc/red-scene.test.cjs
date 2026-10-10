@@ -1,12 +1,12 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { GameBoy } = require("../emulator.js");
+const { GameBoy } = require("../../gbc/emulator.js");
 const { makeROM, makeRedBattle } = require("./helpers.cjs");
-const States = require("../states.js");
-const Scene = require("../scene.js");
-const World = require("../world.js");
-const red = require("../preset/pokemon-red.js");
+const States = require("../../gbc/states.js");
+const Scene = require("../../gbc/scene.js");
+const World = require("../../gbc/world.js");
+const red = require("../../gbc/preset/pokemon-red.js");
 
 function map(id = 38, tileset = 4, width = 4, height = 4) {
   const game = new GameBoy(makeROM({ type: 0x1b, sizeCode: 5, ramSize: 3 }));

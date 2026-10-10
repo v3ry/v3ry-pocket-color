@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { listROMs, extractROM, crc32, MAX_ARCHIVE } = require("../zip.js");
-const { makeROM, makeZIP } = require("./helpers.cjs");
+const { makeROM, makeZIP } = require("./gbc/helpers.cjs");
 
 test("CRC32 reference vector", () => {
   assert.equal(crc32(Buffer.from("123456789")), 0xcbf43926);

@@ -2,9 +2,9 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { GameBoy } = require("../emulator.js");
-const { Cartridge } = require("../cartridge.js");
-const { APU } = require("../audio.js");
+const { GameBoy } = require("../../gbc/emulator.js");
+const { Cartridge } = require("../../gbc/cartridge.js");
+const { APU } = require("../../gbc/audio.js");
 const { makeROM, makeDemoROM } = require("./helpers.cjs");
 
 test("ROM validation rejects truncation, checksum and unsupported mappers", () => {

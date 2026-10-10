@@ -2,8 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { Cartridge } = require("../cartridge.js");
-const { SaveStore, SaveSession } = require("../saves.js");
+const { Cartridge } = require("../../gbc/cartridge.js");
+const { SaveStore, SaveSession } = require("../../gbc/saves.js");
 const { makeROM, memorySaveStore } = require("./helpers.cjs");
 
 test("ROM content keys are stable and distinct even with equal titles", async () => {

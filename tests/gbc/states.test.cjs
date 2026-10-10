@@ -2,8 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { GameBoy } = require("../emulator.js");
-const States = require("../states.js");
+const { GameBoy } = require("../../gbc/emulator.js");
+const States = require("../../gbc/states.js");
 const { makeDemoROM, makeROM, memorySaveStore } = require("./helpers.cjs");
 
 test("GB and GBC states restore CPU, video, memory and continue deterministically", async () => {

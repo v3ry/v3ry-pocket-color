@@ -1,10 +1,10 @@
 "use strict";
 
 const { deflateRawSync } = require("node:zlib");
-const { crc32 } = require("../zip.js");
-const { SaveStore } = require("../saves.js");
+const { crc32 } = require("../../zip.js");
+const { SaveStore } = require("../../gbc/saves.js");
 const { webcrypto } = require("node:crypto");
-const { GameBoy } = require("../emulator.js");
+const { GameBoy } = require("../../gbc/emulator.js");
 
 function makeROM({ color = false, type = 0, sizeCode = 0, ramSize = 0, program = [] } = {}) {
   const rom = new Uint8Array((2 << sizeCode) * 0x4000);

@@ -20,6 +20,14 @@
 
 Ouvrez `index.html` dans un navigateur récent. Aucun build ni installation de dépendances n'est nécessaire. Pour l'installation hors ligne, utilisez HTTPS ou servez le dossier sur `localhost`.
 
+## Organisation du projet
+
+- `gbc/` : moteur Game Boy / Game Boy Color, audio, cartouches, sauvegardes et rendus spécifiques à cette console. Les profils visuels sont dans `gbc/preset/`.
+- À la racine : interface (`index.html`, `styles.css`, `app.js`), lecture des archives (`zip.js`) et application hors ligne.
+- `tests/gbc/` : tests et données synthétiques du moteur ; les tests de l'interface, des archives et de la PWA restent dans `tests/`.
+
+Les futurs moteurs pourront être ajoutés dans des dossiers voisins, comme `gba/`, avec leurs tests dans `tests/gba/`. Seul le moteur GB/GBC est présent et relié à l'interface pour le moment.
+
 ## Commandes par défaut
 
 | Action | Clavier |

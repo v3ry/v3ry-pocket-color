@@ -1,15 +1,15 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { GameBoy } = require("../emulator.js");
+const { GameBoy } = require("../../gbc/emulator.js");
 const { makeROM, makeRedBattle } = require("./helpers.cjs");
-const States = require("../states.js");
-const Graphics = require("../graphics.js");
-const Scene = require("../scene.js");
-const preset = require("../preset/aladdin.js");
-const crystal = require("../preset/pokemon-crystal.js");
-const red = require("../preset/pokemon-red.js");
-const World = require("../world.js");
+const States = require("../../gbc/states.js");
+const Graphics = require("../../gbc/graphics.js");
+const Scene = require("../../gbc/scene.js");
+const preset = require("../../gbc/preset/aladdin.js");
+const crystal = require("../../gbc/preset/pokemon-crystal.js");
+const red = require("../../gbc/preset/pokemon-red.js");
+const World = require("../../gbc/world.js");
 const camera = { ...preset.camera, thickness: preset.thickness, light: 0.75 };
 const pixel = (image, x, y) => [...image.pixels.slice((y * image.width + x) * 4, (y * image.width + x) * 4 + 4)];
 

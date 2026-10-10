@@ -2,9 +2,9 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { GameBoy } = require("../emulator.js");
-const { inspect, tileGrid } = require("../graphics.js");
-const States = require("../states.js");
+const { GameBoy } = require("../../gbc/emulator.js");
+const { inspect, tileGrid } = require("../../gbc/graphics.js");
+const States = require("../../gbc/states.js");
 const { makeROM } = require("./helpers.cjs");
 const pixel = (image, x, y) => [...image.pixels.slice((y * image.width + x) * 4, (y * image.width + x) * 4 + 4)];
 

@@ -5,16 +5,16 @@ const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const fs = require("node:fs");
 const path = require("node:path");
-const { GameBoy } = require("../emulator.js");
+const { GameBoy } = require("../gbc/emulator.js");
 const ZIP = require("../zip.js");
-const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./helpers.cjs");
-const { SaveSession } = require("../saves.js");
-const States = require("../states.js");
-const Graphics = require("../graphics.js");
-const Scene = require("../scene.js");
-const AladdinPreset = require("../preset/aladdin.js");
-const CrystalPreset = require("../preset/pokemon-crystal.js");
-const RedPreset = require("../preset/pokemon-red.js");
+const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./gbc/helpers.cjs");
+const { SaveSession } = require("../gbc/saves.js");
+const States = require("../gbc/states.js");
+const Graphics = require("../gbc/graphics.js");
+const Scene = require("../gbc/scene.js");
+const AladdinPreset = require("../gbc/preset/aladdin.js");
+const CrystalPreset = require("../gbc/preset/pokemon-crystal.js");
+const RedPreset = require("../gbc/preset/pokemon-red.js");
 
 class Element {
   constructor() {
@@ -122,6 +122,33 @@ async function load(h, name, bytes) {
   h.scope.testFile = file(name, bytes);
   await h.evaluate("loadRom(testFile)");
 }
+
+test("HTML loads the relocated GB/GBC browser scripts in dependency order", () => {
+  const root = path.join(__dirname, "..");
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const scripts = [...html.matchAll(/<script src="([^"]+)" defer><\/script>/g)].map(match => match[1]);
+  const scope = vm.createContext({ Uint8Array });
+  for (const script of scripts) {
+    if (script === "app.js" || script === "pwa.js") continue;
+    vm.runInContext(fs.readFileSync(path.join(root, script), "utf8"), scope, { filename: script });
+  }
+  for (const name of ["PocketCPU", "PocketCartridge", "PocketAPU", "PocketGameBoy"]) {
+    assert.equal(typeof scope[name], "function");
+  }
+  assert.equal(typeof scope.PocketZIP.listROMs, "function");
+  assert.equal(typeof scope.PocketSaves.SaveSession, "function");
+  assert.equal(typeof scope.PocketStates.restore, "function");
+  assert.equal(typeof scope.PocketGraphics.inspect, "function");
+  assert.equal(typeof scope.PocketWorld.build, "function");
+  assert.equal(typeof scope.PocketScene.Renderer, "function");
+  assert.equal(scope.PocketPresets.length, 3);
+  for (const color of [false, true]) {
+    const game = new scope.PocketGameBoy(makeDemoROM(color));
+    game.runCycles(70224 * 3);
+    assert.equal(game.color, color);
+    assert.ok(game.frames >= 2);
+  }
+});
 
 test("UI loads GB/GBC, advances the canvas, and pauses without pending frames", async () => {
   const h = harness();
