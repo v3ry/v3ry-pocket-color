@@ -13,6 +13,7 @@
     <script src="gbc/cartridge.js" defer></script>
     <script src="gbc/audio.js" defer></script>
     <script src="gbc/emulator.js" defer></script>
+    <script src="gbc/printer.js" defer></script>
     <script src="zip.js" defer></script>
     <script src="gbc/saves.js" defer></script>
     <script src="gbc/states.js" defer></script>
@@ -36,7 +37,7 @@
         <span class="wordmark-icon" aria-hidden="true">P</span>
         <span>v3ry POCKET<span class="wordmark-color">COLOR</span></span>
       </a>
-      <span class="topbar-note"><span class="live-dot" aria-hidden="true"></span> PRÊT À JOUER <span class="version-badge" aria-label="Version 0.9.0">v0.9.0</span></span>
+      <span class="topbar-note"><span class="live-dot" aria-hidden="true"></span> PRÊT À JOUER <span class="version-badge" aria-label="Version 0.10.0">v0.10.0</span></span>
     </header>
 
     <main class="layout">
@@ -68,6 +69,21 @@
           Votre fichier reste sur votre appareil.
         </p>
         <p class="status-message" id="status-message" role="status" aria-live="polite">En attente d’une ROM.</p>
+        <section id="printer-panel" class="printer-panel" aria-label="Game Boy Printer" hidden>
+          <div class="printer-panel-copy">
+            <div class="printer-panel-heading">
+              <p class="eyebrow">GAME BOY PRINTER</p>
+              <button id="printer-close" class="printer-close-button" type="button" aria-label="Fermer l’encart d’impression">Fermer</button>
+            </div>
+            <p>Une cartouche compatible a envoyé cette image à l’imprimante intégrée.</p>
+            <p id="printer-status" class="status-message" role="status" aria-live="polite">Imprimante prête.</p>
+          </div>
+          <div id="printer-output" class="printer-output" hidden>
+            <div id="printer-paper-window" class="printer-paper-window">
+              <canvas id="printer-paper" width="160" height="1" aria-label="Image imprimée par le Game Boy Printer"></canvas>
+            </div>
+          </div>
+        </section>
       </section>
 
       <section class="player-column" aria-label="Lecteur de jeu">

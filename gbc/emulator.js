@@ -48,6 +48,7 @@
       this.buttons = 0;
       this.serialCycles = 0;
       this.serialOutput = "";
+      this.serialDevice = null;
       this.hdmaBlocks = 0;
       this.hdmaSource = 0;
       this.hdmaDestination = 0;
@@ -62,6 +63,12 @@
       this.updateSTAT();
     }
     interrupt(bit) { this.io[0x0f] |= 1 << bit; }
+    setSerialDevice(device) {
+      if (device !== null && typeof device?.transfer !== "function") {
+        throw new TypeError("Le périphérique série doit exposer une méthode transfer.");
+      }
+      this.serialDevice = device;
+    }
     invalidateVideoLayers() {
       const enabled = VIDEO_LAYERS.get(this)?.enabled || false;
       VIDEO_LAYERS.set(this, { writing: layerBuffers(), ready: layerBuffers(), valid: false, enabled,
@@ -364,8 +371,14 @@
         if ((this.io[2] & 0x81) === 0x81) {
           const period = this.color && (this.io[2] & 2) ? 128 : 4096;
           if (++this.serialCycles >= period) {
-            this.serialOutput += String.fromCharCode(this.io[1]);
-            this.io[1] = 255; this.io[2] &= ~128; this.interrupt(3);
+            const outgoing = this.io[1];
+            if (!this.serialDevice) this.serialOutput += String.fromCharCode(outgoing);
+            const incoming = this.serialDevice ? this.serialDevice.transfer(outgoing) : 255;
+            if (!Number.isInteger(incoming) || incoming < 0 || incoming > 255) {
+              throw new Error("Le périphérique série a renvoyé une valeur hors plage d’octet.");
+            }
+            this.io[1] = incoming;
+            this.io[2] &= ~128; this.interrupt(3);
           }
         }
         if (this.doubleSpeed && (this.speedPhase ^= 1)) continue;

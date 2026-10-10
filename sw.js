@@ -1,9 +1,9 @@
 "use strict";
 
 // Bump this version whenever a cached application file changes.
-const CACHE = "v3ry-pocket-color-app-v30";
+const CACHE = "v3ry-pocket-color-app-v33";
 const ASSETS = ["index.html", "styles.css", "gbc/cpu.js", "gbc/cartridge.js", "gbc/audio.js",
-  "gbc/emulator.js", "zip.js", "gbc/saves.js", "gbc/states.js", "gbc/graphics.js", "app.js", "pwa.js",
+  "gbc/emulator.js", "gbc/printer.js", "zip.js", "gbc/saves.js", "gbc/states.js", "gbc/graphics.js", "app.js", "pwa.js",
   "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "gbc/preset/aladdin.js",
   "gbc/preset/pokemon-crystal.js", "gbc/preset/pokemon-red.js", "gbc/world.js", "gbc/scene.js",
   "gba/cpu.js", "gba/cartridge.js", "gba/audio.js", "gba/graphics.js", "gba/emulator.js"];

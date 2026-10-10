@@ -23,6 +23,13 @@ const cameraButton = document.querySelector("#camera-button");
 const cameraStatus = document.querySelector("#camera-status");
 const cameraCaptureContext = document.querySelector("#camera-capture")
   .getContext("2d", { willReadFrequently: true });
+const printerPanel = document.querySelector("#printer-panel");
+const printerOutput = document.querySelector("#printer-output");
+const printerPaperWindow = document.querySelector("#printer-paper-window");
+const printerPaper = document.querySelector("#printer-paper");
+const printerPaperContext = printerPaper.getContext("2d");
+const printerStatus = document.querySelector("#printer-status");
+const printerCloseButton = document.querySelector("#printer-close");
 const keyAction = document.querySelector("#key-action");
 const bindKeyButton = document.querySelector("#bind-key");
 const keyStatus = document.querySelector("#key-status");
@@ -92,6 +99,10 @@ let paused = false;
 let audioContext = null;
 let audioGain = null;
 let cameraStream = null;
+let printerAnimation = 0;
+let printerRenderVersion = 0;
+let printerPanelDismissed = false;
+const printerDevice = new PocketGameBoyPrinter({ onPrint: showPrinterJob, onStatus: updatePrinterStatus });
 let volume = 0.7;
 let bindingAction = null;
 let inputFocused = true;
@@ -656,8 +667,60 @@ sceneCanvas.addEventListener("webglcontextlost", event => {
 
 function isGBA(game = emulator) { return game?.system === "gba"; }
 function createEmulator(bytes, name) {
-  return /\.gba$/i.test(name) ? new PocketGameBoyAdvance(bytes, audioContext?.sampleRate || 48000)
+  const game = /\.gba$/i.test(name) ? new PocketGameBoyAdvance(bytes, audioContext?.sampleRate || 48000)
     : new PocketGameBoy(bytes, audioContext?.sampleRate || 48000);
+  if (!isGBA(game)) game.setSerialDevice(printerDevice);
+  return game;
+}
+function setPrinterStatus(message, error = false) {
+  printerStatus.textContent = message;
+  printerStatus.classList.toggle("is-error", error);
+}
+function updatePrinterStatus(status) {
+  if (printerAnimation && (status & 2)) {
+    setPrinterStatus("Impression thermique en cours…");
+  } else if (status & 1) {
+    setPrinterStatus("Imprimante : erreur de checksum du paquet.", true);
+  } else if (status & 16) {
+    setPrinterStatus("Imprimante : paquet ou compression invalide.", true);
+  } else if (status & 2) {
+    setPrinterStatus("Impression thermique en cours…");
+  } else if (status & 8) {
+    setPrinterStatus("Image reçue. En attente de l’ordre d’impression.");
+  } else if (status & 4) {
+    setPrinterStatus("Impression terminée. L’imprimante est prête.");
+  } else {
+    setPrinterStatus("Imprimante prête. Le jeu envoie l’image au moment prévu.");
+  }
+}
+function showPrinterJob(job) {
+  printerPanelDismissed = false;
+  printerPanel.hidden = false;
+  printerOutput.hidden = false;
+  printerPaper.width = job.width;
+  printerPaper.height = job.height;
+  printerPaperContext.putImageData(new ImageData(job.pixels, job.width, job.height), 0, 0);
+  printerPaperWindow.style.height = "0px";
+  setPrinterStatus(job.copies > 1
+    ? `Impression thermique en cours… (${job.copies} exemplaires).`
+    : "Impression thermique en cours…");
+  const version = ++printerRenderVersion;
+  const duration = Math.max(1200, job.height * 45);
+  let startedAt = null;
+  const reveal = time => {
+    if (version !== printerRenderVersion) return;
+    if (startedAt === null) startedAt = time;
+    const progress = job.height ? Math.min(1, (time - startedAt) / duration) : 1;
+    const visibleHeight = Math.ceil(job.height * progress);
+    const scale = (printerPaper.clientWidth || printerPaper.width) / printerPaper.width;
+    printerPaperWindow.style.height = `${visibleHeight * scale}px`;
+    if (progress < 1) printerAnimation = requestAnimationFrame(reveal);
+    else {
+      printerAnimation = 0;
+      printerDevice.finishPrinting();
+    }
+  };
+  printerAnimation = requestAnimationFrame(reveal);
 }
 function stopMediaStream(stream) {
   if (stream) for (const track of stream.getTracks()) track.stop();
@@ -754,6 +817,7 @@ function updateConsole() {
   document.querySelector(".system-pill").textContent = gba ? "GBA" : "GB / GBC";
   for (const selector of ["#render-mode", "#scene-smoothing", "#scene-filter"]) document.querySelector(selector).disabled = gba;
   document.querySelector("#camera-settings").hidden = graphicsInspector.hidden = gba;
+  printerPanel.hidden = gba || printerOutput.hidden || printerPanelDismissed;
   for (const button of document.querySelectorAll("[data-gba]")) button.hidden = !gba;
   soundButton.disabled = false;
   soundButton.textContent = audioContext?.state === "running" ? "Couper le son" : "Activer le son";
@@ -773,6 +837,7 @@ function updateConsole() {
       setCameraStatus("Demande d’accès à la webcam…");
     }
   }
+  if (!gba) updatePrinterStatus(printerDevice.status);
   if (gba) stopAudio();
 }
 function draw() {
@@ -1323,6 +1388,10 @@ soundButton.addEventListener("click", async () => {
   }
 });
 cameraButton.addEventListener("click", toggleCamera);
+printerCloseButton.addEventListener("click", () => {
+  printerPanelDismissed = true;
+  printerPanel.hidden = true;
+});
 
 function updateButton(index) {
   if (!isGBA() && index >= 8) return;

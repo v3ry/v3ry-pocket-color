@@ -145,6 +145,18 @@ test("camera states preserve capture registers, busy timing and captured RAM", (
   assert.equal(restored.cartridge.cameraCaptureProvider, null);
 });
 
+test("states preserve an attached serial peripheral without serializing the device", () => {
+  const rom = makeROM(), key = "0".repeat(64);
+  const device = { transfer: () => 0xff };
+  const game = new GameBoy(rom), restored = new GameBoy(rom);
+  game.setSerialDevice(device);
+  const state = States.capture(game, key);
+  assert.equal(Object.hasOwn(state.machine, "serialDevice"), false);
+  restored.setSerialDevice(device);
+  States.restore(restored, state, key);
+  assert.equal(restored.serialDevice, device);
+});
+
 test("legacy version 2 states remain restorable without camera metadata", () => {
   const rom = makeROM({ color: true }), key = "0".repeat(64);
   const original = new GameBoy(rom), restored = new GameBoy(rom);

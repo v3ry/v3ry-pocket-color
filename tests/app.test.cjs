@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { GameBoy } = require("../gbc/emulator.js");
 const { GameBoyAdvance } = require("../gba/emulator.js");
+const { GameBoyPrinter } = require("../gbc/printer.js");
 const { makeGBA, makeGBADemo, eepromCommand, dma3 } = require("./gba/helpers.cjs");
 const ZIP = require("../zip.js");
 const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./gbc/helpers.cjs");
@@ -66,6 +67,12 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     drawImage() {},
     getImageData() { return { data: cameraPixels }; },
   });
+  const printerCanvas = element("#printer-paper");
+  printerCanvas.width = 160; printerCanvas.height = 1; printerCanvas.clientWidth = 160; printerCanvas.style = {};
+  printerCanvas.getContext = () => ({ putImageData(image) { printerCanvas.image = image; } });
+  element("#printer-paper-window").style = {};
+  element("#printer-output").hidden = true;
+  element("#printer-panel").hidden = true;
   const cameraCalls = [], cameraTracks = [];
   const mediaDevices = { async getUserMedia(constraints) {
     cameraCalls.push(constraints);
@@ -115,7 +122,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   }
   const scope = vm.createContext({
     document, window, navigator: { getGamepads: () => [], mediaDevices }, performance,
-    PocketGameBoy: GameBoy, PocketGameBoyAdvance: GameBoyAdvance, PocketZIP: ZIP,
+    PocketGameBoy: GameBoy, PocketGameBoyAdvance: GameBoyAdvance, PocketGameBoyPrinter: GameBoyPrinter, PocketZIP: ZIP,
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
     PocketGraphics: Graphics,
@@ -125,7 +132,9 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
       render(game, preset, camera, mode, smoothing, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.sceneMode = mode; scope.sceneSmoothing = smoothing; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360, smoothed: smoothing }; }
       dispose() { scope.sceneDisposed = true; }
     } },
-    Uint8Array, AudioContext, ImageData: class { constructor(data) { this.data = data; } },
+    Uint8Array, AudioContext, ImageData: class {
+      constructor(data, width, height) { this.data = data; this.width = width; this.height = height; }
+    },
     Blob, URL: {
       createObjectURL: blob => { downloads.push(blob); return "blob:test"; },
       revokeObjectURL() {},
@@ -150,6 +159,16 @@ async function load(h, name, bytes) {
   h.scope.testFile = file(name, bytes);
   await h.evaluate("loadRom(testFile)");
 }
+function sendPrinterPacket(h, command, data = [], compression = 0) {
+  const bytes = [0x88, 0x33, command, compression, data.length & 255, data.length >> 8, ...data];
+  const checksum = bytes.slice(2).reduce((sum, value) => (sum + value) & 0xffff, 0);
+  bytes.push(checksum & 255, checksum >> 8);
+  for (const value of bytes) {
+    h.scope.printerByte = value;
+    h.evaluate("printerDevice.transfer(printerByte)");
+  }
+  return { ack: h.evaluate("printerDevice.transfer(0)"), status: h.evaluate("printerDevice.transfer(0)") };
+}
 
 test("HTML loads the relocated GB/GBC browser scripts in dependency order", () => {
   const root = path.join(__dirname, "..");
@@ -160,7 +179,9 @@ test("HTML loads the relocated GB/GBC browser scripts in dependency order", () =
     if (script === "app.js" || script === "pwa.js") continue;
     vm.runInContext(fs.readFileSync(path.join(root, script), "utf8"), scope, { filename: script });
   }
-  for (const name of ["PocketCPU", "PocketCartridge", "PocketAPU", "PocketGameBoy"]) {
+  const intro = html.slice(html.indexOf('<section class="intro"'), html.indexOf('<section class="player-column"'));
+  assert.ok(intro.includes('id="printer-panel"'), "Printer output belongs below the ROM drop zone");
+  for (const name of ["PocketCPU", "PocketCartridge", "PocketAPU", "PocketGameBoy", "PocketGameBoyPrinter"]) {
     assert.equal(typeof scope[name], "function");
   }
   assert.equal(typeof scope.PocketZIP.listROMs, "function");
@@ -245,6 +266,42 @@ test("Game Boy Camera requests webcam access on load, keeps it on reset and stop
   await load(h, "ordinary.gb", makeDemoROM(false));
   assert.equal(h.element("#camera-panel").hidden, true);
   assert.equal(h.cameraTracks[1].stopped, true);
+});
+
+test("GB/GBC printer displays a received image and reveals its paper progressively", async () => {
+  const h = harness();
+  await load(h, "printer.gb", makeDemoROM(false));
+  assert.equal(h.element("#printer-panel").hidden, true);
+  assert.match(h.element("#printer-status").textContent, /Imprimante prête/);
+  const tiles = new Uint8Array(20 * 16);
+  for (let tile = 0; tile < 20; tile++) {
+    for (let row = 0; row < 8; row++) tiles[tile * 16 + row * 2] = 255;
+  }
+  assert.equal(sendPrinterPacket(h, 0x04, tiles).status, 0x08);
+  assert.equal(sendPrinterPacket(h, 0x02, [1, 0x13, 0xe4, 0x40]).status, 0x08);
+  assert.equal(h.element("#printer-output").hidden, false);
+  assert.equal(h.element("#printer-paper").width, 160);
+  assert.equal(h.element("#printer-paper").height, 40);
+  assert.equal(h.element("#printer-paper-window").style.height, "0px");
+  assert.match(h.element("#printer-status").textContent, /Impression thermique en cours/);
+  const firstFrame = [...h.pending.values()].at(-1);
+  firstFrame(0);
+  [...h.pending.values()].at(-1)(10000);
+  assert.equal(h.element("#printer-paper-window").style.height, "40px");
+  assert.equal(h.evaluate("printerDevice.status"), 0x04);
+  assert.match(h.element("#printer-status").textContent, /Impression terminée/);
+  await h.element("#printer-close").fire("click");
+  assert.equal(h.element("#printer-panel").hidden, true);
+  assert.equal(h.evaluate("printerDevice.status"), 0x04);
+  assert.equal(sendPrinterPacket(h, 0x04, tiles).status, 0x08);
+  assert.equal(sendPrinterPacket(h, 0x02, [1, 0x13, 0xe4, 0x40]).status, 0x08);
+  assert.equal(h.element("#printer-panel").hidden, false);
+  const pixels = h.element("#printer-paper").image.data;
+  assert.deepEqual([...pixels.slice(0, 4)], [247, 244, 226, 255]);
+  assert.ok(pixels[(8 * 160) * 4] < 247);
+
+  await load(h, "printer.gba", makeGBADemo());
+  assert.equal(h.element("#printer-panel").hidden, true);
 });
 
 test("GBA shoulders, gamepad controls and legacy keyboard preferences preserve GB bindings", async () => {

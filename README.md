@@ -2,12 +2,13 @@
 
 Émulateurs web expérimentaux pour Game Boy, Game Boy Color et Game Boy Advance, avec des cœurs écrits en JavaScript dans ce projet. L'application fonctionne sans bibliothèque d'émulation, sans compte et sans service distant.
 
-**Version affichée : 0.9.0** — pré-version expérimentale.
+**Version affichée : 0.10.0** — pré-version expérimentale.
 
 ## Fonctionnalités
 
 - Chargement local de fichiers `.gb`, `.gbc`, `.gba` et `.zip`, avec choix de la ROM dans les archives multijeux ou multiconsoles. Les fichiers ne sont pas envoyés sur un serveur.
 - Émulation du processeur, de la vidéo, du son et des cartouches compatibles. La compatibilité varie selon les jeux.
+- Émulation expérimentale du Game Boy Printer : les jeux compatibles envoient leur image, qui se déroule progressivement à l’écran.
 - Commandes au clavier, personnalisables, tactiles ou avec une manette standard.
 - Pause, redémarrage, plein écran, avance rapide et capture PNG à la résolution de la console. Le son des deux cœurs est disponible et le volume est réglable.
 - Affichage 2D original ; filtres et rendus expérimentaux 2.5D/3D pour le GB/GBC lorsque le jeu dispose d'un profil adapté.

@@ -8,7 +8,7 @@
   const CART_ARRAYS = ["ram", "rtc", "latchedRTC"];
   const CART_EXCLUDE = new Set(["rom", "banks", "color", "title", "mapper", "type", "hasRTC", "saveRevision",
     "isCamera", "cameraRegisters", "cameraCaptureProvider", "cameraBusyCycles", ...CART_ARRAYS]);
-  const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "apu", "color", ...MEMORY]);
+  const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "apu", "color", "serialDevice", ...MEMORY]);
   const APU_EXCLUDE = new Set(["registers", "channels", "samples", "highpass"]);
 
   function scalarCopy(target, exclude) {

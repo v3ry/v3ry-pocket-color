@@ -240,6 +240,24 @@ test("CGB speed switch halves PPU clocks but not CPU timer clocks; serial IRQ", 
   assert.equal(gb.serialOutput, "A"); assert.equal(gb.read(0xff01), 255); assert.equal(gb.io[0x0f] & 8, 8);
 });
 
+test("serial transfers exchange bytes with an attached peripheral", () => {
+  const gb = new GameBoy(makeROM());
+  const received = [];
+  gb.setSerialDevice({ transfer(value) { received.push(value); return value ^ 0xff; } });
+  gb.write(0xff01, 0x35);
+  gb.write(0xff02, 0x81);
+  gb.tick(4096);
+  assert.deepEqual(received, [0x35]);
+  assert.equal(gb.read(0xff01), 0xca);
+  assert.equal(gb.serialOutput, "");
+  assert.equal(gb.io[0x0f] & 8, 8);
+  assert.throws(() => gb.setSerialDevice({}), /transfer/);
+  const invalid = new GameBoy(makeROM());
+  invalid.setSerialDevice({ transfer: () => 256 });
+  invalid.write(0xff02, 0x81);
+  assert.throws(() => invalid.tick(4096), /hors plage d’octet/);
+});
+
 test("real-time CGB budget keeps video and audio cadence at both CPU speeds", () => {
   const rom = makeROM({ color: true, program: [0x18, 0xfe] });
   const normal = new GameBoy(rom), fast = new GameBoy(rom);

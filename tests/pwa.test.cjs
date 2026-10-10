@@ -20,7 +20,7 @@ function worker() {
     self: { registration: { scope }, clients: { async claim() {} }, addEventListener: (name, callback) => { events[name] = callback; } },
     caches: {
       async open() { return cache; },
-      async keys() { return ["unrelated-cache", ...Array.from({ length: 29 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`)]; },
+      async keys() { return ["unrelated-cache", ...Array.from({ length: 32 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`)]; },
       async delete(name) { deleted.push(name); },
     },
     async fetch(request) { network.push(request.url); return { network: true }; },
@@ -38,7 +38,7 @@ function worker() {
 test("service worker precaches only existing application assets and serves offline routes", async () => {
   const w = worker();
   await w.lifecycle("install");
-  assert.equal(w.storage.size, 26);
+  assert.equal(w.storage.size, 27);
   assert.equal(w.storage.has("https://example.test/pocket/gba/audio.js"), true);
   for (const url of w.storage.keys()) assert.ok(fs.existsSync(path.join(__dirname, "..", new URL(url).pathname.slice("/pocket/".length))));
   assert.equal((await w.request(w.scope)).url, w.scope + "index.html");
@@ -48,7 +48,7 @@ test("service worker precaches only existing application assets and serves offli
   assert.equal((await w.request(w.scope + "gba/emulator.js")).cached, true);
   assert.equal(w.network.length, 0);
   await w.lifecycle("activate");
-  assert.deepEqual(w.deleted, Array.from({ length: 29 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
+  assert.deepEqual(w.deleted, Array.from({ length: 32 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
 });
 
 test("offline cache includes every script referenced by the shared interface", async () => {
@@ -70,7 +70,7 @@ test("service worker never intercepts ROM, ZIP, saves, cross-origin or write req
   }
   assert.equal(await w.request("https://other.test/pocket/app.js"), null);
   assert.equal(await w.request(w.scope + "app.js", "POST"), null);
-  assert.equal(w.storage.size, 26);
+  assert.equal(w.storage.size, 27);
   assert.equal(w.network.length, 0);
 });
 
