@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { listROMs, extractROM, crc32, MAX_ARCHIVE } = require("../zip.js");
 const { makeROM, makeZIP } = require("./gbc/helpers.cjs");
+const { makeGBADemo } = require("./gba/helpers.cjs");
 
 test("CRC32 reference vector", () => {
   assert.equal(crc32(Buffer.from("123456789")), 0xcbf43926);
@@ -56,4 +57,29 @@ test("inflated data cannot exceed the announced output size", async () => {
   const archive = listROMs(bytes);
   archive.entries[0].uncompressedSize = 10;
   await assert.rejects(extractROM(archive, archive.entries[0]), /depasse/);
+});
+
+for (const method of [0, 8]) test(`GBA ZIPs extract with method ${method}, CRC and mixed-console selection`, async () => {
+  const rom = makeGBADemo();
+  const archive = listROMs(makeZIP([{ name: "nested/DEMO.GBA", data: rom }, { name: "old.gb", data: makeROM() },
+    { name: "__MACOSX/._DEMO.GBA", data: [1] }], { method, descriptor: true }));
+  assert.deepEqual(archive.entries.map(entry => entry.name), ["nested/DEMO.GBA", "old.gb"]);
+  assert.deepEqual(await extractROM(archive, archive.entries[0]), rom);
+});
+
+test("ZIP ROM limits retain 8 MiB for GB and accept exactly 32 MiB for GBA", async () => {
+  const rom = new Uint8Array(32 * 1024 * 1024);
+  const archive = listROMs(makeZIP([{ name: "large.gba", data: rom }], { method: 8 }));
+  assert.equal((await extractROM(archive, archive.entries[0])).length, rom.length);
+  const bytes = makeZIP([{ name: "large.gba", data: [1] }]);
+  const archive2 = listROMs(bytes);
+  const entry = archive2.entries[0], directory = archive2.directoryOffset;
+  new DataView(bytes.buffer).setUint32(directory + 24, rom.length + 1, true);
+  assert.throws(() => listROMs(bytes), /volumineuse/);
+  const gb = makeZIP([{ name: "large.gb", data: [1] }]);
+  const gbArchive = listROMs(gb);
+  new DataView(gb.buffer).setUint32(gbArchive.directoryOffset + 24, 8 * 1024 * 1024 + 1, true);
+  assert.throws(() => listROMs(gb), /volumineuse/);
+  bytes[30 + entry.nameBytes.length] ^= 1;
+  await assert.rejects(extractROM(archive2, entry), /CRC/);
 });

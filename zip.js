@@ -1,8 +1,10 @@
 (function (root) {
   "use strict";
 
-  const MAX_ARCHIVE = 32 * 1024 * 1024;
+  const MAX_ARCHIVE = 64 * 1024 * 1024;
   const MAX_ROM = 8 * 1024 * 1024;
+  const MAX_GBA_ROM = 32 * 1024 * 1024;
+  const romLimit = name => /\.gba$/i.test(name) ? MAX_GBA_ROM : MAX_ROM;
   const table = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
     let crc = i;
@@ -15,7 +17,7 @@
     return (crc ^ 0xffffffff) >>> 0;
   }
   function listROMs(bytes) {
-    if (bytes.length > MAX_ARCHIVE) throw new Error("ZIP trop volumineux (maximum 32 Mio).");
+    if (bytes.length > MAX_ARCHIVE) throw new Error("ZIP trop volumineux (maximum 64 Mio).");
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const fits = (offset, size) => offset >= 0 && offset + size <= bytes.length;
     let end = -1;
@@ -47,16 +49,16 @@
       if (next > end || view.getUint16(offset + 34, true)) throw new Error("Entree ZIP invalide.");
       const nameBytes = bytes.slice(offset + 46, offset + 46 + nameLength);
       const name = new TextDecoder().decode(nameBytes);
-      if (/\.(gb|gbc)$/i.test(name) && !name.startsWith("__MACOSX/")) {
-        if (uncompressedSize > MAX_ROM || compressedSize > MAX_ARCHIVE || localOffset === 0xffffffff) {
-          throw new Error("ROM ZIP trop volumineuse ou entree ZIP64 (maximum 8 Mio par ROM).");
+      if (/\.(gb|gbc|gba)$/i.test(name) && !name.startsWith("__MACOSX/")) {
+        if (uncompressedSize > romLimit(name) || compressedSize > MAX_ARCHIVE || localOffset === 0xffffffff) {
+          throw new Error("ROM ZIP trop volumineuse ou entree ZIP64 (GB/GBC : 8 Mio ; GBA : 32 Mio).");
         }
         entries.push({ name, nameBytes, flags, method, crc, compressedSize, uncompressedSize, localOffset });
       }
       offset = next;
     }
     if (offset !== end) throw new Error("Taille du repertoire ZIP incoherente.");
-    if (!entries.length) throw new Error("Ce ZIP ne contient aucun fichier .GB ou .GBC.");
+    if (!entries.length) throw new Error("Ce ZIP ne contient aucun fichier .GB, .GBC ou .GBA.");
     return { bytes, entries, directoryOffset: start };
   }
   async function extractROM(archive, entry) {
@@ -111,7 +113,7 @@
     if (crc32(result) !== entry.crc) throw new Error("ROM ZIP corrompue : le CRC ne correspond pas.");
     return result;
   }
-  const api = { listROMs, extractROM, crc32, MAX_ARCHIVE, MAX_ROM };
+  const api = { listROMs, extractROM, crc32, MAX_ARCHIVE, MAX_ROM, MAX_GBA_ROM, romLimit };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.PocketZIP = api;
 })(globalThis);

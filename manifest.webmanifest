@@ -3,7 +3,7 @@
   "name": "v3ry Pocket Color",
   "short_name": "v3ry Pocket",
   "lang": "fr",
-  "description": "Emulateur Game Boy et Game Boy Color avec coeur maison.",
+  "description": "Emulateurs Game Boy, Game Boy Color et Game Boy Advance avec coeurs maison experimentaux.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

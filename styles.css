@@ -265,6 +265,11 @@ h1 span {
   min-width: 0;
 }
 
+.is-gba .screen { aspect-ratio: 3 / 2; }
+.is-gba.is-immersive .screen { aspect-ratio: auto; }
+[data-gba][hidden],
+.settings[hidden] { display: none; }
+
 body.is-immersive {
   overflow: hidden;
 }

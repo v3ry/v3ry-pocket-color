@@ -6,6 +6,8 @@ const vm = require("node:vm");
 const fs = require("node:fs");
 const path = require("node:path");
 const { GameBoy } = require("../gbc/emulator.js");
+const { GameBoyAdvance } = require("../gba/emulator.js");
+const { makeGBA, makeGBADemo, eepromCommand, dma3 } = require("./gba/helpers.cjs");
 const ZIP = require("../zip.js");
 const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./gbc/helpers.cjs");
 const { SaveSession } = require("../gbc/saves.js");
@@ -71,7 +73,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   const pending = new Map();
   const errors = [];
   const intervals = [];
-  const downloads = [];
+  const downloads = [], audioBuffers = [], audioStarts = [];
   window.confirm = () => true;
   window.setInterval = callback => { intervals.push(callback); return intervals.length; };
   window.setTimeout = callback => callback();
@@ -84,10 +86,19 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     createGain() {
       return { gain: { value: 1, setValueAtTime(value) { this.value = value; } }, connect() {} };
     }
+    createBuffer(channels, length, sampleRate) {
+      const data = Array.from({ length: channels }, () => new Float32Array(length));
+      const buffer = { duration: length / sampleRate, getChannelData: index => data[index] };
+      audioBuffers.push({ buffer, data });
+      return buffer;
+    }
+    createBufferSource() {
+      return { connect() {}, start(time) { audioStarts.push(time); }, stop() {}, disconnect() {} };
+    }
   }
   const scope = vm.createContext({
     document, window, navigator: { getGamepads: () => [] }, performance,
-    PocketGameBoy: GameBoy, PocketZIP: ZIP,
+    PocketGameBoy: GameBoy, PocketGameBoyAdvance: GameBoyAdvance, PocketZIP: ZIP,
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
     PocketGraphics: Graphics,
@@ -113,7 +124,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     callback(time);
   };
   const evaluate = expression => vm.runInContext(expression, scope);
-  return { element, evaluate, window, document, preferences, errors, pending, scope, store, intervals, downloads, created };
+  return { element, evaluate, window, document, preferences, errors, pending, scope, store, intervals, downloads, created, audioBuffers, audioStarts };
 }
 function file(name, bytes) {
   return { name, size: bytes.length, arrayBuffer: async () => bytes.slice().buffer };
@@ -142,12 +153,153 @@ test("HTML loads the relocated GB/GBC browser scripts in dependency order", () =
   assert.equal(typeof scope.PocketWorld.build, "function");
   assert.equal(typeof scope.PocketScene.Renderer, "function");
   assert.equal(scope.PocketPresets.length, 3);
+  assert.equal(typeof scope.PocketGameBoyAdvance, "function");
+  assert.equal(typeof scope.PocketGBAAPU, "function");
+  const gba = new scope.PocketGameBoyAdvance(makeGBADemo());
+  gba.runCycles(1232 * 228 * 2);
+  assert.equal(gba.frames, 2);
+  assert.deepEqual([...gba.pixels.slice(0, 4)], [255, 0, 0, 255]);
   for (const color of [false, true]) {
     const game = new scope.PocketGameBoy(makeDemoROM(color));
     game.runCycles(70224 * 3);
     assert.equal(game.color, color);
     assert.ok(game.frames >= 2);
   }
+});
+
+test("GBA loads, renders native dimensions, pauses and returns to GB without losing features", async () => {
+  const h = harness();
+  await load(h, "demo.GBA", makeGBADemo());
+  assert.equal(h.evaluate("isGBA()"), true);
+  assert.equal(h.element("#game-canvas").width, 240); assert.equal(h.element("#game-canvas").height, 160);
+  assert.equal(h.element("#sound-button").disabled, false);
+  assert.equal(h.element("#save-state").disabled, true);
+  assert.equal(h.element("#camera-settings").hidden, true);
+  h.evaluate("advance(0); advance(34)");
+  assert.ok(h.evaluate("emulator.frames") >= 1);
+  assert.deepEqual([...h.element("#game-canvas").image.data.slice(-4)], [255, 0, 0, 255]);
+  await h.element("#pause-button").fire("click"); assert.equal(h.evaluate("paused"), true);
+  await h.element("#capture-screen").fire("click");
+  assert.match(h.element("#comfort-status").textContent, /240 × 160/);
+  await load(h, "demo.gb", makeDemoROM(false));
+  assert.equal(h.evaluate("isGBA()"), false);
+  assert.equal(h.element("#game-canvas").width, 160); assert.equal(h.element("#game-canvas").height, 144);
+  assert.equal(h.element("#sound-button").disabled, false);
+  assert.equal(h.element("#save-state").disabled, false);
+  assert.equal(h.element("#camera-settings").hidden, false);
+});
+
+test("GBA sound button activates scheduled stereo Web Audio output", async () => {
+  const h = harness();
+  await load(h, "sound.gba", makeGBA());
+  await h.element("#sound-button").fire("click");
+  assert.equal(h.evaluate("audioContext.state"), "running");
+  assert.equal(h.evaluate("emulator.apu.sampleRate"), 48000);
+  h.evaluate("emulator.apu.samples.push(0.25, -0.5, 0.75, -1)");
+  h.evaluate("outputAudio()");
+  assert.equal(h.audioBuffers.length, 1);
+  assert.deepEqual([...h.audioBuffers[0].data[0]], [0.25, 0.75]);
+  assert.deepEqual([...h.audioBuffers[0].data[1]], [-0.5, -1]);
+  assert.equal(h.audioStarts.length, 1);
+  await h.element("#sound-button").fire("click");
+  assert.equal(h.evaluate("audioContext.state"), "suspended");
+});
+
+test("GBA shoulders, gamepad controls and legacy keyboard preferences preserve GB bindings", async () => {
+  const preferences = new Map([["v3ry-pocket-color-preferences", JSON.stringify({
+    version: 1, keys: [["ArrowRight", 0], ["ArrowLeft", 1], ["ArrowUp", 2], ["ArrowDown", 3],
+      ["KeyE", 4], ["KeyW", 5], ["ShiftLeft", 6], ["Enter", 7]], volume: 0.5, fps: false,
+  })]]);
+  const h = harness(memorySaveStore(), preferences);
+  assert.equal(h.evaluate("keys.get('KeyE')"), 4);
+  assert.equal(h.evaluate("new Set(keys.values()).size"), 10);
+  await load(h, "test.gba", makeGBA());
+  h.window.fire("keydown", { code: "KeyE", target: new Element(), preventDefault() {} });
+  assert.equal(h.evaluate("emulator.buttons & 1"), 0);
+  h.evaluate("releaseControls()");
+  h.element("#key-action").value = "8"; h.element("#bind-key").fire("click");
+  h.window.fire("keydown", { code: "KeyX", target: new Element(), preventDefault() {} });
+  h.window.fire("keydown", { code: "KeyX", target: new Element(), preventDefault() {} });
+  assert.equal(h.evaluate("emulator.buttons & 512"), 0);
+  const saved = JSON.parse(preferences.get("v3ry-pocket-color-preferences")); assert.equal(saved.version, 2);
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false })); buttons[5].pressed = true;
+  h.scope.navigator.getGamepads = () => [{ connected: true, mapping: "standard", buttons, axes: [0, 0] }];
+  h.evaluate("pollGamepads()"); assert.equal(h.evaluate("emulator.buttons & 256"), 0);
+  await load(h, "test.gb", makeROM({ program: [0x18, 0xfe] }));
+  h.evaluate("pollGamepads()"); assert.equal(h.evaluate("emulator.buttons"), 0);
+});
+
+test("GBA SRAM import, export, reboot, history and fresh launch retain console isolation", async () => {
+  const h = harness(), rom = makeGBADemo();
+  await load(h, "test.gba", rom);
+  h.evaluate("emulator.write8(0x0e000000, 1)");
+  await h.evaluate("saveCurrent()");
+  const key = `gba:${await h.store.keyFor(rom)}`;
+  assert.equal(h.store.records.get(key).ram[0], 1);
+  assert.equal(h.store.records.has(key.slice(4)), false);
+  h.element("#save-file").files = [file("test.sav", new Uint8Array(32768).fill(2))];
+  await h.element("#save-file").fire("change");
+  assert.equal(h.evaluate("emulator.read8(0x0e000000)"), 2);
+  assert.equal(h.evaluate("isGBA()"), true);
+  await h.element("#export-save").fire("click"); assert.equal(h.downloads.at(-1).size, 32768);
+  assert.equal(h.created.at(-1).download, "test.sav");
+  await h.element("#reset-button").fire("click"); assert.equal(h.evaluate("emulator.read8(0x0e000000)"), 2);
+  await h.element("#recover-save").fire("click"); assert.equal(h.evaluate("emulator.read8(0x0e000000)"), 1);
+  const fresh = harness(h.store); await load(fresh, "renamed.gba", rom);
+  assert.equal(fresh.evaluate("emulator.read8(0x0e000000)"), 1);
+});
+
+test("mixed-console ZIPs select GB/GBA and malformed GBA leaves the running game intact", async () => {
+  const h = harness(), gba = makeGBADemo();
+  await load(h, "single.zip", makeZIP([{ name: "folder/test.GBA", data: gba }], { method: 8 }));
+  assert.equal(h.evaluate("isGBA()"), true);
+  await load(h, "mixed.zip", makeZIP([{ name: "test.gb", data: makeDemoROM(false) }, { name: "test.gba", data: gba }]));
+  assert.equal(h.element("#archive-picker").hidden, false);
+  h.element("#archive-rom").value = "0"; await h.element("#archive-open").fire("click");
+  assert.equal(h.evaluate("isGBA()"), false);
+  h.element("#archive-rom").value = "1"; await h.element("#archive-open").fire("click");
+  assert.equal(h.evaluate("isGBA()"), true);
+  await load(h, "bad.gba", new Uint8Array(192));
+  assert.equal(h.evaluate("isGBA()"), true); assert.match(h.element("#status-message").textContent, /En-tete/);
+  await h.element("#save-state").fire("click"); assert.match(h.element("#state-status").textContent, /non disponibles/);
+});
+
+test("GBA EEPROM ZIP loading, both import sizes, export, history and fresh launch preserve saves", async () => {
+  const h = harness(), rom = makeGBA({ signature: "EEPROM_V124" });
+  await load(h, "eeprom.zip", makeZIP([{ name: "folder/eeprom.gba", data: rom }], { method: 8 }));
+  assert.equal(h.evaluate("emulator.cartridge.kind"), "EEPROM");
+  assert.equal(h.element("#import-save").disabled, false);
+  for (const length of [8192, 512]) {
+    h.element("#save-file").files = [file("eeprom.sav", new Uint8Array(length).fill(length === 512 ? 2 : 1))];
+    await h.element("#save-file").fire("change");
+    assert.equal(h.evaluate("emulator.cartridge.ram.length"), length);
+    assert.equal(h.evaluate("emulator.cartridge.ram[0]"), length === 512 ? 2 : 1);
+    assert.equal(h.evaluate("paused"), false);
+    await h.element("#export-save").fire("click"); assert.equal(h.downloads.at(-1).size, length);
+    assert.equal(h.created.at(-1).download, "eeprom.sav");
+    await h.element("#reset-button").fire("click"); assert.equal(h.evaluate("emulator.cartridge.ram.length"), length);
+  }
+  h.element("#save-file").files = [file("invalid.sav", new Uint8Array(513))];
+  await h.element("#save-file").fire("change");
+  assert.match(h.element("#save-status").textContent, /512 ou 8192/);
+  assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 2);
+  const g = h.evaluate("emulator"), data = Uint8Array.of(3, 4, 5, 6, 7, 8, 9, 10);
+  eepromCommand(0, 6, data).forEach((bit, index) => g.write16(0x02000000 + index * 2, bit));
+  dma3(g, 0x02000000, 0x0d000000, 73);
+  await h.evaluate("saveCurrent()");
+  const key = `gba:${await h.store.keyFor(rom)}`;
+  assert.deepEqual(h.store.records.get(key).ram.slice(0, 8), data);
+  await h.element("#recover-save").fire("click");
+  assert.equal(h.evaluate("emulator.cartridge.ram.length"), 512);
+  assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 2);
+  h.element("#ram-history").value = String(h.store.records.get(`history:${key}`).findIndex(copy => copy.data.ram.length === 8192));
+  await h.element("#restore-history").fire("click");
+  assert.equal(h.evaluate("emulator.cartridge.ram.length"), 8192);
+  assert.equal(h.evaluate("emulator.cartridge.ram[0]"), 1);
+  const fresh = harness(h.store); await load(fresh, "eeprom.gba", rom);
+  assert.equal(fresh.evaluate("emulator.cartridge.ram.length"), 8192);
+  assert.equal(fresh.evaluate("emulator.cartridge.ram[0]"), 1);
+  assert.equal(h.errors.length, 0); assert.equal(fresh.errors.length, 0);
 });
 
 test("UI loads GB/GBC, advances the canvas, and pauses without pending frames", async () => {

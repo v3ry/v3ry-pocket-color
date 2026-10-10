@@ -100,7 +100,8 @@
         if (this.cartridge.hasRTC) this.cartridge.updateRTC();
         if (this.savedRevision === this.cartridge.saveRevision) return false;
         const data = this.cartridge.saveData(), revision = this.cartridge.saveRevision;
-        const ramChanged = !data.ram.every((byte, index) => byte === this.committedData.ram[index]);
+        const ramChanged = data.ram.length !== this.committedData.ram.length
+          || !data.ram.every((byte, index) => byte === this.committedData.ram[index]);
         const recovery = ramChanged && !this.recoverySaved ? this.recoveryData : undefined;
         await this.store.writeGame(this.key, data, recovery, ramChanged ? this.committedData : undefined);
         if (recovery !== undefined) this.recoverySaved = true;

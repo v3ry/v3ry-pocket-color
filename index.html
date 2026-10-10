@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f5ed">
-    <meta name="description" content="Lancez vos jeux Game Boy Color directement dans votre navigateur.">
+    <meta name="description" content="Lancez vos ROM Game Boy, Game Boy Color et Game Boy Advance dans votre navigateur.">
     <title>v3ry Pocket Color — émulateur web</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="manifest" href="manifest.webmanifest">
@@ -22,6 +22,11 @@
     <script src="gbc/preset/pokemon-red.js" defer></script>
     <script src="gbc/world.js" defer></script>
     <script src="gbc/scene.js" defer></script>
+    <script src="gba/cpu.js" defer></script>
+    <script src="gba/cartridge.js" defer></script>
+    <script src="gba/audio.js" defer></script>
+    <script src="gba/graphics.js" defer></script>
+    <script src="gba/emulator.js" defer></script>
     <script src="app.js" defer></script>
     <script src="pwa.js" defer></script>
   </head>
@@ -41,7 +46,7 @@
         <p class="intro-copy">Chargez une ROM que vous possédez et retrouvez le plaisir du jeu, directement depuis votre navigateur.</p>
 
         <label class="drop-zone" id="drop-zone" for="rom-file">
-          <input id="rom-file" type="file" accept=".gb,.gbc,.zip">
+          <input id="rom-file" type="file" accept=".gb,.gbc,.gba,.zip">
           <span class="upload-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14.5v4A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -49,7 +54,7 @@
           </span>
           <span class="upload-title">Choisir une ROM</span>
           <span class="upload-subtitle">ou glisser-déposer ici</span>
-          <span class="file-types">Formats acceptés : .GB, .GBC, .ZIP</span>
+          <span class="file-types">Formats acceptés : .GB, .GBC, .GBA, .ZIP</span>
         </label>
         <div id="archive-picker" class="archive-picker" hidden>
           <label for="archive-rom">Jeu à ouvrir dans l’archive</label>
@@ -113,9 +118,10 @@
           <label class="volume-control" for="volume">Volume <input id="volume" type="range" min="0" max="100" value="70"><output id="volume-value" for="volume">70 %</output></label>
         </div>
         <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
+        <p class="status-message" id="console-status" role="status" hidden>GBA expérimentale : audio PSG et Direct Sound disponibles ; états, shaders et 3D non disponibles. Sauvegardes SRAM, Flash et EEPROM prises en charge. Certains services BIOS ne sont pas implémentés ; une erreur arrête explicitement l’émulation.</p>
         <p id="comfort-status" class="status-message" role="status" aria-live="polite">Vitesse normale. Le son est coupé pendant l’avance rapide.</p>
         <p id="scene-status" class="status-message" role="status" aria-live="polite">Prototype 2.5D : chargez Pokémon Rouge FR, Cristal UE 1.1 ou Aladdin GBC pour activer un preset.</p>
-        <details class="settings">
+        <details class="settings" id="camera-settings">
           <summary>Caméra et relief 2.5D / 3D</summary>
           <p>Shaders au choix : lissage léger FXAA, arrondi des sprites (coins de pixels coupés sans flou), netteté ou CRT rétro (lignes, masque RGB et vignettage). Choisir un filtre l’active. En 2D, toute l’image est filtrée, textes inclus, sans preset requis. En 2.5D/3D, dialogues et menu Start restent nets. Décochez « Activer le shader » pour retrouver les pixels originaux. Le filtre ajoute une passe GPU ; l’arrondi ne mélange pas les couleurs et ne floute pas l’image.</p>
           <p>Prototype visuel : Aladdin sépare ses couches ; Cristal UE 1.1 ajoute un relief selon les collisions de la carte et redresse les personnages. Menus non reconnus sans relief, fenêtre en surimpression. Le jeu et ses collisions restent en 2D.</p>
@@ -145,6 +151,7 @@
               <option value="2">Haut</option><option value="3">Bas</option>
               <option value="4">A</option><option value="5">B</option>
               <option value="6">Select</option><option value="7">Start</option>
+              <option value="8">L · GBA</option><option value="9">R · GBA</option>
             </select>
             <button id="bind-key" type="button">Changer la touche</button>
             <button id="reset-keys" type="button">Clavier par défaut</button>
@@ -227,8 +234,10 @@
             <button data-key="3" class="pad-down" type="button" aria-label="Bas">↓</button>
           </div>
           <div class="system-controls">
+            <button data-key="8" data-gba type="button" aria-label="Bouton L" hidden>L</button>
             <button data-key="6" type="button">Select</button>
             <button data-key="7" type="button">Start</button>
+            <button data-key="9" data-gba type="button" aria-label="Bouton R" hidden>R</button>
           </div>
           <div class="action-controls">
             <button data-key="5" type="button" aria-label="Bouton B">B</button>
@@ -241,7 +250,7 @@
         <div class="help-icon" aria-hidden="true">?</div>
         <div>
           <h2>Prêt à jouer ?</h2>
-          <p>Clavier par défaut : flèches, A/Z sur AZERTY ou Q/W sur QWERTY, Entrée et Maj. Touches personnalisables dans Commandes et performances. F6 sauvegarde l’état sélectionné, F8 le recharge après confirmation. Manette standard : croix/stick gauche, boutons inférieurs A/B, Select et Start. Des boutons tactiles sont aussi disponibles.</p>
+          <p>Clavier par défaut : flèches, A/Z sur AZERTY ou Q/W sur QWERTY, Entrée et Maj. GBA : E et R pour L/R. Touches personnalisables dans Commandes et performances. GB/GBC : F6 sauvegarde l’état sélectionné, F8 le recharge après confirmation. Manette standard : croix/stick gauche, boutons inférieurs A/B, Select, Start et boutons d’épaule L/R en GBA. Des boutons tactiles sont aussi disponibles.</p>
           <p>Plein écran : bouton Plein écran ou touche F ; Échap pour quitter. Si le navigateur ne le permet pas, un mode immersif dans la page est proposé.</p>
           <p>ZIP : compression standard ou fichiers non compressés. Si plusieurs ROM sont présentes, choisissez le jeu à lancer. Le cœur maison est expérimental : certains jeux peuvent présenter des défauts.</p>
           <p>In-game : sauvegardez depuis le menu du jeu, puis choisissez Continuer au prochain lancement. L’enregistrement de la RAM ne garantit pas que le jeu y a écrit une sauvegarde valide. Les .sav contiennent la RAM, sans l’horloge.</p>

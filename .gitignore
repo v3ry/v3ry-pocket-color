@@ -4,6 +4,7 @@ node_modules/
 !.env.example
 *.gb
 *.gbc
+*.gba
 *.zip
 *.sav
 *.state
@@ -13,4 +14,4 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
-roms/
+private/

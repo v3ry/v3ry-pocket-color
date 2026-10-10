@@ -70,6 +70,7 @@ const defaultKeys = [
   ["ArrowRight", 0], ["ArrowLeft", 1], ["ArrowUp", 2], ["ArrowDown", 3],
   // Physical Q/W positions are labelled A/Z on AZERTY keyboards.
   ["KeyQ", 4], ["KeyW", 5], ["ShiftLeft", 6], ["ShiftRight", 6], ["Enter", 7],
+  ["KeyE", 8], ["KeyR", 9],
 ];
 const keys = new Map(defaultKeys);
 
@@ -118,14 +119,14 @@ function preferenceError(error) {
   console.error(error);
 }
 function keyboardSummary() {
-  const names = ["Droite", "Gauche", "Haut", "Bas", "A", "B", "Select", "Start"];
+  const names = ["Droite", "Gauche", "Haut", "Bas", "A", "B", "Select", "Start", "L (GBA)", "R (GBA)"];
   keyStatus.textContent = names.map((name, index) =>
     `${name} : ${[...keys].filter(([, value]) => value === index).map(([code]) => code).join("/")}`).join(" · ");
 }
 function persistPreferences() {
   try {
     window.localStorage.setItem("v3ry-pocket-color-preferences", JSON.stringify({
-      version: 1, keys: [...keys], volume, fps: fpsToggle.checked,
+      version: 2, keys: [...keys], volume, fps: fpsToggle.checked,
     }));
     preferencesStatus.hidden = true;
   } catch (error) { preferenceError(error); }
@@ -138,16 +139,23 @@ try {
   const stored = window.localStorage.getItem("v3ry-pocket-color-preferences");
   if (stored) {
     const data = JSON.parse(stored);
-    if (data.version !== 1 || !Array.isArray(data.keys) || data.keys.length < 8 || data.keys.length > 16
+    const actions = data.version === 1 ? 8 : 10;
+    if (![1, 2].includes(data.version) || !Array.isArray(data.keys) || data.keys.length < actions
+      || data.keys.length > (data.version === 1 ? 16 : 20)
       || data.keys.some(entry => !Array.isArray(entry) || entry.length !== 2 || !validKey(entry[0])
-        || !Number.isInteger(entry[1]) || entry[1] < 0 || entry[1] > 7)
+        || !Number.isInteger(entry[1]) || entry[1] < 0 || entry[1] >= actions)
       || new Set(data.keys.map(entry => entry[0])).size !== data.keys.length
-      || new Set(data.keys.map(entry => entry[1])).size !== 8
+      || new Set(data.keys.map(entry => entry[1])).size !== actions
       || !Number.isFinite(data.volume) || data.volume < 0 || data.volume > 1 || typeof data.fps !== "boolean") {
       throw new Error("Format de préférences invalide ; réglages par défaut utilisés.");
     }
     keys.clear();
     for (const [code, index] of data.keys) keys.set(code, index);
+    if (data.version === 1) {
+      const candidates = ["KeyE", "KeyR", "KeyT", "KeyY", ...Array.from({ length: 10 }, (_, i) => `Digit${i}`),
+        ...Array.from({ length: 10 }, (_, i) => `Numpad${i}`)];
+      for (const index of [8, 9]) keys.set(candidates.find(code => !keys.has(code)), index);
+    }
     volume = data.volume;
     fpsToggle.checked = data.fps;
   }
@@ -188,7 +196,7 @@ function pollGamepads() {
     const pads = supported ? [...navigator.getGamepads()].filter(Boolean) : [];
     const standard = pads.filter(pad => pad.connected && pad.mapping === "standard");
     const message = !supported ? "API manette indisponible dans ce navigateur. Utilisez le clavier ou les commandes tactiles."
-      : standard.length ? "Manette standard connectée : croix/stick gauche, A/B, Select/Start."
+      : standard.length ? `Manette standard connectée : croix/stick gauche, A/B, Select/Start${isGBA() ? ", L/R" : ""}.`
       : pads.length ? "Manette non standard : disposition non prise en charge. Utilisez le clavier."
         : "Manette : connectez une manette standard et appuyez sur un bouton.";
     if (gamepadStatus.textContent !== message) gamepadStatus.textContent = message;
@@ -198,7 +206,7 @@ function pollGamepads() {
       && inputFocused && !document.hidden && !document.activeElement?.closest("input, select, textarea, [contenteditable]")) {
       for (const pad of standard) {
         const down = index => !!pad.buttons[index]?.pressed;
-        for (const [button, index] of [[15, 0], [14, 1], [12, 2], [13, 3], [0, 4], [1, 5], [8, 6], [9, 7]]) {
+        for (const [button, index] of [[15, 0], [14, 1], [12, 2], [13, 3], [0, 4], [1, 5], [8, 6], [9, 7], [4, 8], [5, 9]]) {
           if (down(button)) pressed.add(index);
         }
         if (pad.axes[0] > 0.35) pressed.add(0);
@@ -319,11 +327,11 @@ function updateSaveButtons() {
   exportButton.disabled = importButton.disabled = busy || !emulator?.cartridge.ram.length;
   reloadSaveButton.disabled = recoverSaveButton.disabled = busy || !saveSession;
   for (const button of [saveStateButton, loadStateButton, exportStateButton, importStateButton]) {
-    button.disabled = busy || !emulator || !gameKey;
+    button.disabled = busy || !emulator || !gameKey || isGBA();
   }
   restoreHistoryButton.disabled = busy || !saveSession || !ramHistory.value;
-  stateSlot.disabled = stateName.disabled = busy || !emulator;
-  quickSaveButton.disabled = quickLoadButton.disabled = busy || !emulator || !gameKey;
+  stateSlot.disabled = stateName.disabled = busy || !emulator || isGBA();
+  quickSaveButton.disabled = quickLoadButton.disabled = busy || !emulator || !gameKey || isGBA();
 }
 
 async function saveCurrent(notify = false) {
@@ -350,6 +358,7 @@ async function saveCurrent(notify = false) {
 function stopAudio() {
   for (const source of audioSources) source.stop();
   audioSources.clear();
+  emulator?.apu?.drain?.();
   nextAudioTime = 0;
 }
 
@@ -371,7 +380,8 @@ function stopLoop() {
 }
 
 function outputAudio() {
-  const samples = emulator.apu.drain();
+  const samples = emulator?.apu?.drain?.();
+  if (!samples) return;
   if (playbackSpeed !== 1 || !audioContext || audioContext.state !== "running" || !samples.length) return;
   const length = samples.length / 2;
   const buffer = audioContext.createBuffer(2, length, emulator.apu.sampleRate);
@@ -417,13 +427,13 @@ document.querySelector("#capture-screen").addEventListener("click", async () => 
     return;
   }
   try {
-    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc)$/i, "")
+    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc|gba)$/i, "")
       .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
-    context.putImageData(new ImageData(emulator.pixels, 160, 144), 0, 0);
+    context.putImageData(new ImageData(emulator.pixels, canvas.width, canvas.height), 0, 0);
     const blob = await new Promise((resolve, reject) => canvas.toBlob(result =>
       result ? resolve(result) : reject(new Error("Le navigateur n’a pas produit de PNG.")), "image/png"));
     downloadFile(blob, `${name}-${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
-    comfortMessage("Capture PNG 160 × 144 téléchargée, sans pause ni modification de la partie.");
+    comfortMessage(`Capture PNG ${canvas.width} × ${canvas.height} téléchargée, sans pause ni modification de la partie.`);
   } catch (error) {
     comfortMessage(`Capture impossible : ${error.message}`, true);
     console.error(error);
@@ -431,6 +441,7 @@ document.querySelector("#capture-screen").addEventListener("click", async () => 
 });
 
 function updateGraphics(force = false) {
+  if (isGBA()) return;
   if (!graphicsInspector.open || player.classList.contains("is-immersive")) return;
   if (!emulator) {
     graphicsStatus.textContent = "Chargez une ROM pour examiner sa mémoire vidéo.";
@@ -504,13 +515,20 @@ function resetSceneCamera() {
   cameraControls();
 }
 function returnTo2D(message, error = false) {
-  emulator?.setVideoCapture(false);
+  if (!isGBA()) emulator?.setVideoCapture(false);
   renderMode.value = "2d";
   sceneCanvas.hidden = true;
   sceneCanvas.setAttribute("aria-hidden", "true");
   sceneMessage(message, error);
 }
 function updateScene(force = false) {
+  if (isGBA()) {
+    sceneGame?.setVideoCapture?.(false);
+    sceneGame = null;
+    scenePreset = null;
+    returnTo2D("GBA : rendu 2D natif 240 × 160. Shaders et rendus 2.5D/3D non disponibles.");
+    return;
+  }
   if (sceneGame !== emulator) {
     sceneGame?.setVideoCapture(false);
     sceneGame = emulator;
@@ -629,8 +647,32 @@ sceneCanvas.addEventListener("webglcontextlost", event => {
   returnTo2D("Contexte WebGL perdu : rendu 2D rétabli. Réessayez la 2.5D après restauration du contexte.", true);
 });
 
+function isGBA(game = emulator) { return game?.system === "gba"; }
+function createEmulator(bytes, name) {
+  return /\.gba$/i.test(name) ? new PocketGameBoyAdvance(bytes, audioContext?.sampleRate || 48000)
+    : new PocketGameBoy(bytes, audioContext?.sampleRate || 48000);
+}
+function consoleName(game = emulator) {
+  return isGBA(game) ? "GAME BOY ADVANCE" : game?.color ? "GAME BOY COLOR" : "GAME BOY";
+}
+function updateConsole() {
+  const gba = isGBA();
+  canvas.width = gba ? 240 : 160;
+  canvas.height = gba ? 160 : 144;
+  canvas.setAttribute("aria-label", gba ? "Écran de jeu Game Boy Advance" : "Écran de jeu Game Boy Color");
+  player.classList.toggle("is-gba", gba);
+  document.querySelector(".system-pill").textContent = gba ? "GBA" : "GB / GBC";
+  for (const selector of ["#render-mode", "#scene-smoothing", "#scene-filter"]) document.querySelector(selector).disabled = gba;
+  document.querySelector("#camera-settings").hidden = graphicsInspector.hidden = gba;
+  for (const button of document.querySelectorAll("[data-gba]")) button.hidden = !gba;
+  soundButton.disabled = false;
+  soundButton.textContent = audioContext?.state === "running" ? "Couper le son" : "Activer le son";
+  soundButton.setAttribute("aria-pressed", String(audioContext?.state === "running"));
+  document.querySelector("#console-status").hidden = !gba;
+  if (gba) stopAudio();
+}
 function draw() {
-  context.putImageData(new ImageData(emulator.pixels, 160, 144), 0, 0);
+  context.putImageData(new ImageData(emulator.pixels, canvas.width, canvas.height), 0, 0);
   updateScene();
   updateGraphics();
 }
@@ -643,7 +685,7 @@ function run(time) {
       // Bound catch-up after a slow frame; do not fast-forward a hidden tab.
       const delta = time - previousTime;
       if (delta > 50) limitedFrames++;
-      cycleDebt += Math.min(delta, 50) * clock * playbackSpeed / 1000;
+      cycleDebt += Math.min(delta, 50) * (emulator.clock || clock) * playbackSpeed / 1000;
       const started = performance.now();
       if (cycleDebt > 0) cycleDebt -= emulator.runCycles(cycleDebt);
       emulationTime += performance.now() - started;
@@ -675,7 +717,7 @@ function run(time) {
 }
 
 function startGame(bytes, name, version = loadVersion) {
-  const candidate = new PocketGameBoy(bytes, audioContext?.sampleRate || 48000);
+  const candidate = createEmulator(bytes, name);
   const transition = async () => {
     if (version !== loadVersion) return;
     transitioning = true;
@@ -687,7 +729,8 @@ function startGame(bytes, name, version = loadVersion) {
       if (saveSession && !stateMode) await saveSession.flush();
       if (version !== loadVersion) return;
       let session = null, restored = false;
-      const key = await saveStore.keyFor(bytes);
+      const hash = await saveStore.keyFor(bytes);
+      const key = isGBA(candidate) ? `gba:${hash}` : hash;
       if (candidate.cartridge.ram.length || candidate.cartridge.hasRTC) {
         setSaveStatus("Lecture de la sauvegarde locale…");
         session = new PocketSaves.SaveSession(saveStore, key, candidate.cartridge);
@@ -705,15 +748,17 @@ function startGame(bytes, name, version = loadVersion) {
       gameName.textContent = candidate.cartridge.title || name;
       gameName.title = name;
       placeholder.hidden = true;
-      screenCaption.textContent = candidate.color ? "GAME BOY COLOR" : "GAME BOY";
+      screenCaption.textContent = consoleName(candidate);
       restartButton.disabled = pauseButton.disabled = resetButton.disabled = false;
       pauseButton.textContent = "Pause";
+      updateConsole();
       draw();
       setStatus(`${name} — cœur maison actif. Compatibilité expérimentale.`);
       setSaveStatus(session ? restored ? "RAM in-game restaurée avant le démarrage. Choisissez Continuer dans le jeu."
         : "Aucune sauvegarde in-game locale. Enregistrement automatique de la RAM activé."
         : "Cette cartouche n’a pas de RAM de sauvegarde ni d’horloge.");
-      setStateStatus("État indépendant : sauvegardez un instant, puis chargez-le avec Charger l’état.");
+      setStateStatus(isGBA() ? "GBA : sauvegardes d’état non disponibles. Utilisez la sauvegarde du jeu et les exports .sav."
+        : "État indépendant : sauvegardez un instant, puis chargez-le avec Charger l’état.");
       historyCopies = [];
       ramHistory.replaceChildren();
       refreshStateSlot();
@@ -744,12 +789,12 @@ async function loadRom(file) {
   archive = null;
   archivePicker.hidden = true;
   const extension = file.name.split(".").pop()?.toLowerCase();
-  if (!["gb", "gbc", "zip"].includes(extension)) {
-    setStatus("Choisissez un fichier .GB, .GBC ou .ZIP.", true);
+  if (!["gb", "gbc", "gba", "zip"].includes(extension)) {
+    setStatus("Choisissez un fichier .GB, .GBC, .GBA ou .ZIP.", true);
     return;
   }
-  if (!file.size || file.size > (extension === "zip" ? PocketZIP.MAX_ARCHIVE : PocketZIP.MAX_ROM)) {
-    setStatus("Fichier vide ou trop volumineux (ROM : 8 Mio ; ZIP : 32 Mio).", true);
+  if (!file.size || file.size > (extension === "zip" ? PocketZIP.MAX_ARCHIVE : PocketZIP.romLimit(file.name))) {
+    setStatus("Fichier vide ou trop volumineux (GB/GBC : 8 Mio ; GBA : 32 Mio ; ZIP : 64 Mio).", true);
     return;
   }
   setStatus(extension === "zip" ? "Lecture de l’archive ZIP…" : "Lecture de la ROM…");
@@ -804,7 +849,7 @@ pauseButton.addEventListener("click", () => {
   paused = !paused;
   stopLoop();
   pauseButton.textContent = paused ? "Reprendre" : "Pause";
-  screenCaption.textContent = paused ? "PAUSE" : emulator.color ? "GAME BOY COLOR" : "GAME BOY";
+  screenCaption.textContent = paused ? "PAUSE" : consoleName();
   if (!paused) animation = requestAnimationFrame(run);
   else saveCurrent();
 });
@@ -846,7 +891,7 @@ exportButton.addEventListener("click", () => {
   if (!emulator?.cartridge.ram.length || transitioning || importing) return;
   try {
     const bytes = emulator.cartridge.exportRAM();
-    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc)$/i, "") + ".sav";
+    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc|gba)$/i, "") + ".sav";
     downloadFile(new Blob([bytes], { type: "application/octet-stream" }), name);
     setSaveStatus("Export .sav lancé : RAM uniquement, sans l’horloge RTC.");
   } catch (error) {
@@ -860,8 +905,9 @@ saveInput.addEventListener("change", async () => {
   saveInput.value = "";
   if (!file || !emulator || transitioning || importing) return;
   const target = emulator, session = saveSession, version = loadVersion;
-  if (!/\.sav$/i.test(file.name) || file.size !== target.cartridge.ram.length || !file.size) {
-    setSaveStatus(`Fichier .sav invalide : ${target.cartridge.ram.length} octets attendus.`, true);
+  const ramSizes = target.cartridge.ramSizes || [target.cartridge.ram.length];
+  if (!/\.sav$/i.test(file.name) || !ramSizes.includes(file.size) || !file.size) {
+    setSaveStatus(`Fichier .sav invalide : ${ramSizes.join(" ou ")} octets attendus.`, true);
     return;
   }
   try {
@@ -876,7 +922,7 @@ saveInput.addEventListener("change", async () => {
     updateSaveButtons();
     stopLoop();
     // Reboot against the imported RAM rather than letting the running game overwrite it.
-    const candidate = new PocketGameBoy(loadedBytes, audioContext?.sampleRate || 48000);
+    const candidate = createEmulator(loadedBytes, loadedName);
     candidate.cartridge.restoreData(target.cartridge.saveData());
     candidate.cartridge.importRAM(bytes);
     if (session) {
@@ -936,11 +982,13 @@ function activateRestored(candidate, session, fromState) {
   paused = false;
   pauseButton.disabled = false;
   pauseButton.textContent = "Pause";
-  screenCaption.textContent = candidate.color ? "GAME BOY COLOR" : "GAME BOY";
+  screenCaption.textContent = consoleName(candidate);
+  updateConsole();
   draw();
   updateSaveButtons();
   canvas.focus();
-  if (!fromState) setStateStatus("États indépendants disponibles dans les trois emplacements ; aucun état actif.");
+  if (!fromState) setStateStatus(isGBA() ? "GBA : états non disponibles ; sauvegarde de cartouche active."
+    : "États indépendants disponibles dans les trois emplacements ; aucun état actif.");
 }
 
 async function restoreLocalRAM(recovery = false, historyCopy = null) {
@@ -952,7 +1000,7 @@ async function restoreLocalRAM(recovery = false, historyCopy = null) {
     if (target !== emulator || version !== loadVersion || transitioning || importing) {
       throw new Error("Le jeu a changé pendant la lecture. Réessayez.");
     }
-    const candidate = new PocketGameBoy(loadedBytes, audioContext?.sampleRate || 48000);
+    const candidate = createEmulator(loadedBytes, loadedName);
     candidate.cartridge.restoreData(data);
     if (!window.confirm("Recharger cette RAM redémarrera le jeu sans enregistrer les modifications actuelles. Continuer ?")) return;
     importing = true;
@@ -1004,6 +1052,7 @@ async function refreshStateSlot() {
   statePreview.hidden = true;
   stateInfo.textContent = "Lecture de l’emplacement…";
   stateName.value = "";
+  if (isGBA()) { stateInfo.textContent = "États GBA non disponibles."; return; }
   if (!key) { stateInfo.textContent = "Chargez un jeu."; return; }
   try {
     const data = await saveStore.read(storageKey);
@@ -1054,6 +1103,7 @@ restoreHistoryButton.addEventListener("click", () => {
 });
 
 saveStateButton.addEventListener("click", async () => {
+  if (isGBA()) { setStateStatus("Sauvegardes d’état GBA non disponibles ; utilisez les fichiers .sav.", true); return; }
   if (!emulator || transitioning || importing) return;
   const target = emulator, key = gameKey, slot = stateSlot.value || "1";
   try {
@@ -1075,6 +1125,7 @@ saveStateButton.addEventListener("click", async () => {
 });
 
 async function restoreState(data, target, key, version) {
+  if (isGBA(target)) throw new Error("Sauvegardes d'etat GBA non disponibles.");
   if (target !== emulator || key !== gameKey || version !== loadVersion || transitioning || importing) {
     throw new Error("Le jeu a changé pendant la lecture de l’état. Réessayez.");
   }
@@ -1102,6 +1153,7 @@ async function restoreState(data, target, key, version) {
   }
 }
 loadStateButton.addEventListener("click", async () => {
+  if (isGBA()) { setStateStatus("Sauvegardes d’état GBA non disponibles ; utilisez les fichiers .sav.", true); return; }
   if (!emulator || transitioning || importing) return;
   const target = emulator, key = gameKey, version = loadVersion;
   try {
@@ -1114,6 +1166,7 @@ loadStateButton.addEventListener("click", async () => {
   }
 });
 exportStateButton.addEventListener("click", () => {
+  if (isGBA()) { setStateStatus("Sauvegardes d’état GBA non disponibles ; utilisez les fichiers .sav.", true); return; }
   if (!emulator || transitioning || importing) return;
   try {
     const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc)$/i, "") + ".state";
@@ -1129,6 +1182,7 @@ stateInput.addEventListener("change", async () => {
   const file = stateInput.files[0];
   stateInput.value = "";
   if (!file || !emulator || transitioning || importing) return;
+  if (isGBA()) { setStateStatus("Import d’état GBA non disponible ; utilisez les fichiers .sav.", true); return; }
   const target = emulator, key = gameKey, version = loadVersion;
   try {
     if (!/\.state$/i.test(file.name)) throw new Error("Choisissez un fichier .state de v3ry Pocket Color, pas un .sav.");
@@ -1161,6 +1215,7 @@ soundButton.addEventListener("click", async () => {
 });
 
 function updateButton(index) {
+  if (!isGBA() && index >= 8) return;
   const pressed = [...heldKeys].some((key) => keys.get(key) === index)
     || [...heldPointers.values()].includes(index) || heldGamepad.has(index);
   emulator?.setButton(index, pressed);
@@ -1191,6 +1246,7 @@ window.addEventListener("keydown", (event) => {
   if (["F6", "F8"].includes(event.code) && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey
     && !event.target.closest("input, select, textarea, button, a, [contenteditable]")) {
     event.preventDefault();
+    if (isGBA()) { setStateStatus("États GBA non disponibles : utilisez la sauvegarde du jeu ou un fichier .sav.", true); return; }
     (event.code === "F6" ? saveStateButton : loadStateButton).click();
     return;
   }
