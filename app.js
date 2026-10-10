@@ -447,7 +447,7 @@ document.querySelector("#capture-screen").addEventListener("click", async () => 
   try {
     const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc|gba)$/i, "")
       .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
-    context.putImageData(new ImageData(emulator.pixels, canvas.width, canvas.height), 0, 0);
+    context.putImageData(new ImageData(emulator.framePixels || emulator.pixels, canvas.width, canvas.height), 0, 0);
     const blob = await new Promise((resolve, reject) => canvas.toBlob(result =>
       result ? resolve(result) : reject(new Error("Le navigateur n’a pas produit de PNG.")), "image/png"));
     downloadFile(blob, `${name}-${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
@@ -841,7 +841,7 @@ function updateConsole() {
   if (gba) stopAudio();
 }
 function draw() {
-  context.putImageData(new ImageData(emulator.pixels, canvas.width, canvas.height), 0, 0);
+  context.putImageData(new ImageData(emulator.framePixels || emulator.pixels, canvas.width, canvas.height), 0, 0);
   updateScene();
   updateGraphics();
 }

@@ -5,6 +5,18 @@ const { GameBoyAdvance } = require("../../gba/emulator.js");
 const { makeGBA } = require("./helpers.cjs");
 const game = () => new GameBoyAdvance(makeGBA());
 const pixel = (g, x = 0, y = 0) => [...g.pixels.slice((y * 240 + x) * 4, (y * 240 + x + 1) * 4)];
+const affineGame = () => {
+  const g = game();
+  g.write16(0x04000000, 0x402); g.write16(0x0400000c, 0x100);
+  g.write16(0x04000020, 0x100); g.write16(0x04000026, 0x100);
+  g.vram[0x800] = 1;
+  for (let row = 0; row < 6; row++) g.vram[64 + row * 8] = row + 1;
+  g.vram[65] = 2; g.vram[66] = 3; g.vram[74] = 3;
+  for (const [index, color] of [0, 31, 31 << 5, 31 << 10, 0x7fff, 31 | 31 << 5, 31 | 31 << 10].entries()) {
+    g.write16(0x05000000 + index * 2, color);
+  }
+  return g;
+};
 
 test("bitmap modes 3, 4 and 5 respect pixels, palettes, pages and transparent borders", () => {
   for (const mode of [3, 4, 5]) {
@@ -30,6 +42,32 @@ test("affine background uses signed matrix, reference coordinates and wrap contr
   g.graphics.line(0); assert.deepEqual(pixel(g), [0, 0, 255, 255]);
   g.write32(0x04000028, 128 * 256); g.graphics.line(0); assert.deepEqual(pixel(g), [0, 0, 0, 255]);
   g.write16(0x0400000c, 0x2100); g.graphics.line(0); assert.deepEqual(pixel(g), [0, 0, 255, 255]);
+});
+
+test("affine background accumulates matrix increments independently for each scanline", () => {
+  const g = affineGame();
+  g.graphics.line(0); assert.deepEqual(pixel(g), [255, 0, 0, 255]);
+  g.write16(0x04000026, 0x200);
+  g.graphics.line(1); assert.deepEqual(pixel(g, 0, 1), [0, 255, 0, 255]);
+  g.graphics.line(2); assert.deepEqual(pixel(g, 0, 2), [255, 255, 255, 255]);
+});
+
+test("affine reference writes replace the current scanline origin without reapplying its line offset", () => {
+  const g = affineGame();
+  g.graphics.line(0);
+  g.write32(0x0400002c, 2 * 256);
+  g.graphics.line(1);
+  assert.deepEqual(pixel(g, 0, 1), [0, 0, 255, 255]);
+});
+
+test("affine matrix writes during a scanline are latched for the following scanline", () => {
+  const g = affineGame();
+  g.graphics.latchLine(0);
+  g.write16(0x04000020, 0x200);
+  g.graphics.line(0);
+  assert.deepEqual(pixel(g, 1), [0, 255, 0, 255]);
+  g.graphics.latchLine(1); g.graphics.line(1);
+  assert.deepEqual(pixel(g, 1, 1), [0, 0, 255, 255]);
 });
 
 test("sprites retain OAM order, priority, transparency, flips and palette", () => {

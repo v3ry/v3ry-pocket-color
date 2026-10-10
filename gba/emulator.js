@@ -18,6 +18,8 @@
       this.vram = new Uint8Array(0x18000); this.oam = new Uint8Array(1024);
       this.pixels = new Uint8ClampedArray(240 * 160 * 4);
       this.pixels.fill(255);
+      this.framePixels = new Uint8ClampedArray(240 * 160 * 4);
+      this.framePixels.fill(255);
       this.cpu = new CPU(this);
       this.graphics = new Graphics(this);
       this.apu = new APU(sampleRate);
@@ -156,6 +158,9 @@
       }
       if (offset === 4) value = (value & 0xf8) | (this.io[4] & 7);
       const previous = this.io[offset]; this.io[offset] = value;
+      if (offset >= 0x28 && offset < 0x30 || offset >= 0x38 && offset < 0x40) {
+        this.graphics.affineReferenceWrite(offset);
+      }
       if (offset >= 0x100 && offset < 0x110) {
         const timer = this.timers[(offset - 0x100) >>> 2], part = offset & 3;
         if (part < 2) timer.reload = this.io16(offset & ~3);
@@ -255,13 +260,14 @@
           this.dot = 0; this.line = (this.line + 1) % 228;
           this.io[4] &= ~2; this.setIO16(6, this.line);
           if (this.line === 160) {
-            this.frames++; this.io[4] |= 1;
+            this.frames++; this.framePixels.set(this.pixels); this.io[4] |= 1;
             if (this.io[4] & 8) this.interrupt(1);
             this.triggerDMA(1);
           }
           if (this.line === 227) this.io[4] &= ~1;
           if (this.line === this.io[5]) { this.io[4] |= 4; if (this.io[4] & 32) this.interrupt(4); }
           else this.io[4] &= ~4;
+          if (this.line < 160) this.graphics.latchLine(this.line);
         }
       }
     }
@@ -273,7 +279,7 @@
         if (pending && !this.waitMask) this.halted = false;
         if (pending && this.io16(0x208) & 1 && !(this.cpu.cpsr & 128)) {
           this.write16(0x03007ff8, this.read16(0x03007ff8) | pending);
-          this.cpu.irq();
+          this.cpu.irq(); this.halted = false;
         }
         if (this.dmaStall) { cycles = Math.min(this.dmaStall, 64); this.dmaStall -= cycles; }
         else if (this.halted) cycles = Math.min(64, Math.ceil(budget - elapsed));

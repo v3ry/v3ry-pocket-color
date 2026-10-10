@@ -213,6 +213,8 @@ test("GBA loads, renders native dimensions, pauses and returns to GB without los
   assert.equal(h.element("#sound-button").disabled, false);
   assert.equal(h.element("#save-state").disabled, true);
   assert.equal(h.element("#camera-settings").hidden, true);
+  h.evaluate("emulator.pixels.fill(0); emulator.framePixels.fill(0); emulator.framePixels.set([0, 255, 0, 255], 0); draw()");
+  assert.deepEqual([...h.element("#game-canvas").image.data.slice(0, 4)], [0, 255, 0, 255]);
   h.evaluate("advance(0); advance(34)");
   assert.ok(h.evaluate("emulator.frames") >= 1);
   assert.deepEqual([...h.element("#game-canvas").image.data.slice(-4)], [255, 0, 0, 255]);

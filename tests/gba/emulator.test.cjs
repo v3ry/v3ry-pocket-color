@@ -100,6 +100,18 @@ test("DMA immediate and repeated HBlank transfers use count, destination reload 
   g.tick(1232); assert.equal(g.read16(0x03000010), 0x9876);
 });
 
+test("HBlank affine DMA updates the following scanline, not the line already rendered", () => {
+  const g = game();
+  g.write16(0x04000000, 0x402); g.write16(0x0400000c, 0x100);
+  g.write16(0x04000020, 0x100); g.write16(0x04000026, 0x100);
+  g.write32(0x02000000, 0x00000200); g.write32(0x02000004, 0x02000000);
+  g.write32(0x040000b0, 0x02000000); g.write32(0x040000b4, 0x04000020);
+  g.write16(0x040000b8, 2); g.write16(0x040000ba, 0xa660);
+  g.tick(1232);
+  assert.equal(g.graphics.affineLineMatrices[0], 0x100);
+  assert.equal(g.graphics.affineLineMatrices[8], 0x200);
+});
+
 test("video timing reaches VBlank after 160 lines and wraps after 228", () => {
   const g = game();
   g.write16(0x04000004, 8);
@@ -107,6 +119,16 @@ test("video timing reaches VBlank after 160 lines and wraps after 228", () => {
   assert.equal(g.frames, 1); assert.equal(g.read16(0x04000006), 160);
   assert.ok(g.io16(4) & 1); assert.ok(g.io16(0x202) & 1);
   g.tick(1232 * 68); assert.equal(g.line, 0); assert.equal(g.dot, 0); assert.equal(g.io16(4) & 1, 0);
+});
+
+test("GBA presents a complete framebuffer only after all visible scanlines reach VBlank", () => {
+  const g = game();
+  g.write16(0x04000000, 0x403); g.write16(0x06000000, 31);
+  g.tick(960);
+  assert.deepEqual([...g.pixels.slice(0, 4)], [255, 0, 0, 255]);
+  assert.deepEqual([...g.framePixels.slice(0, 4)], [255, 255, 255, 255]);
+  g.tick(1232 * 160 - 960);
+  assert.deepEqual([...g.framePixels.slice(0, 4)], [255, 0, 0, 255]);
 });
 
 test("all ten controls map to active-low GBA keypad and keypad IRQ", () => {
@@ -142,6 +164,20 @@ test("nested GBA IRQs restore the interrupted handler context before the origina
   assert.equal(c.r[15], 0x080000c0); assert.equal(c.cpsr, 0x3f);
   assert.equal(c.r[0], 123); assert.equal(c.r[12], 456);
   assert.equal(c.irqFrames.length, 0);
+});
+
+test("an IRQ taken during IntrWait runs its handler immediately, then resumes waiting", () => {
+  const g = game(), c = g.cpu;
+  g.write32(0x03007ffc, 0x03000000); g.write32(0x03000000, 0xe12fff1e);
+  g.write16(0x04000200, 5);
+  c.cpsr = 0x1f; c.r[15] = 0x080000c0;
+  g.swi(5); assert.equal(g.halted, true);
+  g.interrupt(4);
+  g.runCycles(1);
+  assert.equal(g.halted, false); assert.equal(c.cpsr & 31, 0x12); assert.equal(c.r[15], 0x138);
+  g.runCycles(1);
+  assert.equal(c.r[15], 0x080000c0); assert.equal(g.halted, true); assert.equal(g.waitMask, 1);
+  g.interrupt(1); assert.equal(g.halted, false); assert.equal(g.waitMask, 0);
 });
 
 test("HLE division, CpuSet/FastSet, waits and unsupported services", () => {

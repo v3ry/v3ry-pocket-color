@@ -5,6 +5,7 @@
     [[8, 16], [8, 32], [16, 32], [32, 64]]];
   const word = (bytes, at) => (bytes[at] || 0) | (bytes[at + 1] || 0) << 8;
   const signed16 = value => value << 16 >> 16;
+  const signed28 = value => value << 4 >> 4;
   const inside = (value, start, end) => start <= end ? value >= start && value < end : value >= start || value < end;
 
   class Graphics {
@@ -15,6 +16,12 @@
       this.objPriority = new Int8Array(240);
       this.objAlpha = new Uint8Array(240);
       this.objWindow = new Uint8Array(240);
+      this.affineRefs = new Int32Array(4);
+      this.affineLineRefs = new Int32Array(160 * 4);
+      this.affineLineMatrices = new Int16Array(160 * 8);
+      this.lineDisplay = 128;
+      this.latchedLine = -1;
+      this.lineReady = false;
     }
     tile(base, x, y, depth, palette) {
       const v = this.game.vram;
@@ -62,11 +69,45 @@
         this.bgColors[target + x] = this.tile(character + tile * (affine || depth ? 64 : 32), tx, ty, affine || depth, palette);
       }
     }
-    affine(bg, x, y) {
-      const g = this.game, offset = bg === 2 ? 0x20 : 0x30;
-      const refX = g.io32(offset + 8) << 4 >> 4, refY = g.io32(offset + 12) << 4 >> 4;
-      return [(refX + signed16(g.io16(offset)) * x + signed16(g.io16(offset + 2)) * y) >> 8,
-        (refY + signed16(g.io16(offset + 4)) * x + signed16(g.io16(offset + 6)) * y) >> 8];
+    affineReferenceWrite(offset) {
+      const base = offset >= 0x28 && offset < 0x30 ? 0x20 : offset >= 0x38 && offset < 0x40 ? 0x30 : 0;
+      if (!base) return;
+      const axis = offset < base + 12 ? 0 : 1, index = (base === 0x20 ? 0 : 2) + axis;
+      this.affineRefs[index] = signed28(this.game.io32(base + 8 + axis * 4));
+    }
+    resetAffineReferences() {
+      for (let bg = 0; bg < 2; bg++) {
+        const base = bg ? 0x30 : 0x20, index = bg * 2;
+        this.affineRefs[index] = signed28(this.game.io32(base + 8));
+        this.affineRefs[index + 1] = signed28(this.game.io32(base + 12));
+      }
+    }
+    latchLine(line) {
+      if (line === 0) this.resetAffineReferences();
+      this.affineLineRefs.set(this.affineRefs, line * 4);
+      const matrix = line * 8;
+      for (let bg = 0; bg < 2; bg++) {
+        const base = bg ? 0x30 : 0x20;
+        for (let register = 0; register < 4; register++) {
+          this.affineLineMatrices[matrix + bg * 4 + register] = this.game.io16(base + register * 2);
+        }
+      }
+      this.lineDisplay = this.game.io16(0);
+      this.latchedLine = line;
+      this.lineReady = true;
+    }
+    advanceAffineReferences(line) {
+      const matrix = line * 8;
+      for (let bg = 0; bg < 2; bg++) {
+        const index = bg * 2, parameters = matrix + bg * 4;
+        this.affineRefs[index] = signed28(this.affineRefs[index] + signed16(this.affineLineMatrices[parameters + 1]));
+        this.affineRefs[index + 1] = signed28(this.affineRefs[index + 1] + signed16(this.affineLineMatrices[parameters + 3]));
+      }
+    }
+    affine(bg, x, line) {
+      const index = line * 4 + (bg - 2) * 2, matrix = line * 8 + (bg - 2) * 4;
+      return [(this.affineLineRefs[index] + signed16(this.affineLineMatrices[matrix]) * x) >> 8,
+        (this.affineLineRefs[index + 1] + signed16(this.affineLineMatrices[matrix + 2]) * x) >> 8];
     }
     objects(line, display) {
       const g = this.game, oam = g.oam, mosaic = g.io16(0x4c), mode = display & 7;
@@ -108,10 +149,12 @@
       }
     }
     line(line) {
-      const g = this.game, display = g.io16(0), mode = display & 7;
+      if (!this.lineReady || this.latchedLine !== line) this.latchLine(line);
+      const g = this.game, display = this.lineDisplay, mode = display & 7;
       if (mode > 5) throw new Error(`Mode video GBA reserve : ${mode}.`);
       if (display & 128) {
-        g.pixels.fill(255, line * 240 * 4, (line + 1) * 240 * 4); return;
+        g.pixels.fill(255, line * 240 * 4, (line + 1) * 240 * 4);
+        this.advanceAffineReferences(line); this.lineReady = false; return;
       }
       this.bgColors.fill(-1);
       for (let bg = 0; bg < 4; bg++) if (display & (0x100 << bg)
@@ -156,6 +199,8 @@
         }
         g.pixels[offset + 3] = 255;
       }
+      this.advanceAffineReferences(line);
+      this.lineReady = false;
     }
   }
   if (typeof module !== "undefined" && module.exports) module.exports = { Graphics };
