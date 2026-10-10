@@ -44,7 +44,7 @@ test("service worker precaches only existing application assets and serves offli
   assert.equal((await w.request(w.scope + "app.js?version=1")).cached, true);
   assert.equal(w.network.length, 0);
   await w.lifecycle("activate");
-  assert.deepEqual(w.deleted, Array.from({ length: 20 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
+  assert.deepEqual(w.deleted, Array.from({ length: 21 }, (_, i) => `v3ry-pocket-color-app-v${i + 1}`));
 });
 
 test("service worker never intercepts ROM, ZIP, saves, cross-origin or write requests", async () => {

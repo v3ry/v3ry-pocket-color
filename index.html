@@ -31,7 +31,7 @@
         <span class="wordmark-icon" aria-hidden="true">P</span>
         <span>v3ry POCKET<span class="wordmark-color">COLOR</span></span>
       </a>
-      <span class="topbar-note"><span class="live-dot" aria-hidden="true"></span> PRÊT À JOUER</span>
+      <span class="topbar-note"><span class="live-dot" aria-hidden="true"></span> PRÊT À JOUER <span class="version-badge" aria-label="Version 0.9.0">v0.9.0</span></span>
     </header>
 
     <main class="layout">
@@ -186,36 +186,39 @@
           <pre id="graphics-registers"></pre>
           <details><summary>Positions et attributs des 40 sprites</summary><pre id="graphics-entries"></pre></details>
         </details>
-        <h3 class="save-heading">Sauvegarde in-game · mémoire de cartouche</h3>
-        <div class="player-actions" aria-label="Sauvegardes in-game">
-          <button id="save-button" type="button" disabled>Enregistrer la RAM</button>
-          <button id="reload-save" type="button" disabled>Recharger la RAM locale</button>
-          <button id="recover-save" type="button" disabled>Récupérer la RAM précédente</button>
-          <label for="ram-history">Historique RAM</label>
-          <select id="ram-history"><option value="">Aucune copie historique</option></select>
-          <button id="restore-history" type="button" disabled>Restaurer cette copie</button>
-          <button id="export-save" type="button" disabled>Exporter .sav</button>
-          <button id="import-save" type="button" disabled>Importer .sav</button>
-          <input id="save-file" type="file" accept=".sav" hidden>
-        </div>
-        <p class="status-message" id="save-status" role="status" aria-live="polite">Les sauvegardes restent dans ce navigateur.</p>
-        <h3 class="save-heading">Sauvegarde d’état · reprendre au même instant</h3>
-        <div class="state-slot settings-row">
-          <label for="state-slot">Emplacement</label>
-          <select id="state-slot"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
-          <label for="state-name">Nom</label>
-          <input id="state-name" type="text" maxlength="60" placeholder="Ma partie">
-          <img id="state-preview" width="80" height="72" alt="Miniature de l’état enregistré" hidden>
-          <span id="state-info">Emplacement vide</span>
-        </div>
-        <div class="player-actions" aria-label="Sauvegardes d’état">
-          <button id="save-state" type="button" disabled>Sauvegarder l’état</button>
-          <button id="load-state" type="button" disabled>Charger l’état</button>
-          <button id="export-state" type="button" disabled>Exporter .state</button>
-          <button id="import-state" type="button" disabled>Importer .state</button>
-          <input id="state-file" type="file" accept=".state" hidden>
-        </div>
-        <p class="status-message" id="state-status" role="status" aria-live="polite">Les états sont indépendants des fichiers .sav.</p>
+        <details class="settings save-settings">
+          <summary>Sauvegardes · RAM et états</summary>
+          <h3 class="save-heading">Sauvegarde in-game · mémoire de cartouche</h3>
+          <div class="player-actions" aria-label="Sauvegardes in-game">
+            <button id="save-button" type="button" disabled>Enregistrer la RAM</button>
+            <button id="reload-save" type="button" disabled>Recharger la RAM locale</button>
+            <button id="recover-save" type="button" disabled>Récupérer la RAM précédente</button>
+            <label for="ram-history">Historique RAM</label>
+            <select id="ram-history"><option value="">Aucune copie historique</option></select>
+            <button id="restore-history" type="button" disabled>Restaurer cette copie</button>
+            <button id="export-save" type="button" disabled>Exporter .sav</button>
+            <button id="import-save" type="button" disabled>Importer .sav</button>
+            <input id="save-file" type="file" accept=".sav" hidden>
+          </div>
+          <p class="status-message" id="save-status" role="status" aria-live="polite">Les sauvegardes restent dans ce navigateur.</p>
+          <h3 class="save-heading">Sauvegarde d’état · reprendre au même instant</h3>
+          <div class="state-slot settings-row">
+            <label for="state-slot">Emplacement</label>
+            <select id="state-slot"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+            <label for="state-name">Nom</label>
+            <input id="state-name" type="text" maxlength="60" placeholder="Ma partie">
+            <img id="state-preview" width="80" height="72" alt="Miniature de l’état enregistré" hidden>
+            <span id="state-info">Emplacement vide</span>
+          </div>
+          <div class="player-actions" aria-label="Sauvegardes d’état">
+            <button id="save-state" type="button" disabled>Sauvegarder l’état</button>
+            <button id="load-state" type="button" disabled>Charger l’état</button>
+            <button id="export-state" type="button" disabled>Exporter .state</button>
+            <button id="import-state" type="button" disabled>Importer .state</button>
+            <input id="state-file" type="file" accept=".state" hidden>
+          </div>
+          <p class="status-message" id="state-status" role="status" aria-live="polite">Les états sont indépendants des fichiers .sav.</p>
+        </details>
         <div class="touch-controls" aria-label="Commandes de jeu">
           <div class="direction-pad">
             <button data-key="2" class="pad-up" type="button" aria-label="Haut">↑</button>
