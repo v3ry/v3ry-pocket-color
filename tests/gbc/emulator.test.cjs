@@ -11,7 +11,7 @@ test("ROM validation rejects truncation, checksum and unsupported mappers", () =
   assert.throws(() => new Cartridge(new Uint8Array(12)), /tronquee/);
   const rom = makeROM(); rom[0x134] ^= 1;
   assert.throws(() => new Cartridge(rom), /checksum/);
-  assert.throws(() => new Cartridge(makeROM({ type: 0x22 })), /non prise en charge/);
+  assert.throws(() => new Cartridge(makeROM({ type: 0x20 })), /non prise en charge/);
   assert.throws(() => new Cartridge(makeROM().slice(0, 0x8000 - 1)), /tronquee/);
 });
 

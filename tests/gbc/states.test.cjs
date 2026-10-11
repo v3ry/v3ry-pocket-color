@@ -60,6 +60,29 @@ test("states restore mapper banks, RTC latch, DMA, timer overflow and APU phases
   assert.equal(restored.cpu.bus, restored);
 });
 
+test("MBC7 states preserve EEPROM words, mid-command EEPROM state, accelerometer latch and bank", async () => {
+  const rom = makeROM({ type: 0x22, sizeCode: 2, program: [0x18, 0xfe] });
+  const key = await memorySaveStore().keyFor(rom), game = new GameBoy(rom);
+  game.cartridge.control(0, 0x0a); game.cartridge.control(0x4000, 0x40);
+  game.cartridge.control(0x2000, 3);
+  game.cartridge.ram[10] = 0xbe; game.cartridge.ram[11] = 0xef;
+  game.cartridge.eepromWriteEnabled = true;
+  game.cartridge.writeRAM(0xa010, 0xaa);
+  game.cartridge.eepromPhase = 2; game.cartridge.eepromShift = 0xbeef; game.cartridge.eepromCount = 3;
+  const state = States.capture(game, key), restored = new GameBoy(rom);
+  States.restore(restored, state, key);
+  assert.equal(restored.cartridge.ram[10], 0xbe);
+  assert.equal(restored.cartridge.ram[11], 0xef);
+  assert.equal(restored.cartridge.eepromWriteEnabled, true);
+  assert.equal(restored.cartridge.eepromPhase, 2);
+  assert.equal(restored.cartridge.eepromShift, 0xbeef);
+  assert.equal(restored.cartridge.eepromCount, 3);
+  assert.equal(restored.cartridge.mbc7Latched, true);
+  assert.equal(restored.cartridge.bank, 3);
+  restored.cartridge.control(0, 0x0a); restored.cartridge.control(0x4000, 0x40);
+  assert.equal(restored.cartridge.readRAM(0xa020), 0xd0);
+});
+
 test("wrong ROM, version and corrupt snapshots are rejected without mutation", async () => {
   const rom = makeDemoROM(true), key = await memorySaveStore().keyFor(rom), game = new GameBoy(rom);
   game.runCycles(70224);

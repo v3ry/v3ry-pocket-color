@@ -96,6 +96,11 @@
     for (const [key, max] of Object.entries({ bank: 511, highBank: 3, ramBank: 255, mode: 1, latch: 255 })) {
       integer(cart[key], 0, max);
     }
+    if (game.cartridge.mapper === "MBC7") {
+      integer(cart.eepromPhase, 0, 3);
+      integer(cart.eepromCount, 0, 26);
+      integer(cart.eepromShift, 0, 0x3ffffff);
+    }
     let cameraRegisters = null, cameraBusyCycles = 0;
     if (data.version === 3) {
       if (game.cartridge.isCamera) {

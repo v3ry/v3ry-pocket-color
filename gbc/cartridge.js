@@ -7,7 +7,7 @@
     [0x05, "MBC2"], [0x06, "MBC2"],
     [0x0f, "MBC3"], [0x10, "MBC3"], [0x11, "MBC3"], [0x12, "MBC3"], [0x13, "MBC3"],
     [0x19, "MBC5"], [0x1a, "MBC5"], [0x1b, "MBC5"], [0x1c, "MBC5"], [0x1d, "MBC5"], [0x1e, "MBC5"],
-    [0xfc, "Camera"],
+    [0x22, "MBC7"], [0xfc, "Camera"],
   ]);
   const RAM_SIZES = [0, 2048, 8192, 32768, 131072, 65536];
   const CAMERA_WIDTH = 128, CAMERA_SENSOR_HEIGHT = 120, CAMERA_HEIGHT = 112;
@@ -36,7 +36,7 @@
       this.color = !!(bytes[0x143] & 0x80);
       const titleEnd = this.color ? 0x13f : 0x144;
       this.title = String.fromCharCode(...bytes.subarray(0x134, titleEnd)).replace(/\0.*$/, "").trim();
-      this.ram = new Uint8Array(this.mapper === "MBC2" ? 512 : RAM_SIZES[bytes[0x149]]);
+      this.ram = new Uint8Array(this.mapper === "MBC2" ? 512 : this.mapper === "MBC7" ? 256 : RAM_SIZES[bytes[0x149]]);
       this.ramEnabled = this.mapper === "ROM";
       this.bank = 1;
       this.highBank = 0;
@@ -52,6 +52,17 @@
       this.cameraRegisters = new Uint8Array(0x36);
       this.cameraCaptureProvider = null;
       this.cameraBusyCycles = 0;
+      if (this.mapper === "MBC7") {
+        this.mbc7Gate2 = false;
+        this.mbc7Latched = false;
+        this.eepromCS = false;
+        this.eepromClk = false;
+        this.eepromDI = false;
+        this.eepromPhase = 0;
+        this.eepromCount = 0;
+        this.eepromShift = 0;
+        this.eepromWriteEnabled = false;
+      }
     }
     readROM(address) {
       let bank = 0;
@@ -62,6 +73,12 @@
     }
     control(address, value) {
       if (this.mapper === "ROM") return;
+      if (this.mapper === "MBC7") {
+        if (address < 0x2000) this.ramEnabled = value === 0x0a;
+        else if (address < 0x4000) this.bank = value & 127;
+        else if (address < 0x6000) this.mbc7Gate2 = value === 0x40;
+        return;
+      }
       if (this.mapper === "MBC2") {
         if (address < 0x4000) {
           if (address & 0x100) this.bank = (value & 15) || 1;
@@ -176,6 +193,7 @@
       return (bank * 8192 + (address & 8191)) % this.ram.length;
     }
     readRAM(address) {
+      if (this.mapper === "MBC7") return this.readMBC7(address);
       if (this.mapper === "Camera") {
         if (this.ramBank & 0x10) return this.cameraRegister(address);
         if (this.cameraBusyCycles) return 0;
@@ -193,6 +211,7 @@
       return this.mapper === "MBC2" ? value | 0xf0 : value;
     }
     writeRAM(address, value) {
+      if (this.mapper === "MBC7") { this.writeMBC7(address, value); return; }
       if (this.mapper === "Camera") {
         if (this.ramBank & 0x10) { this.writeCameraRegister(address, value); return; }
         if (!this.ramEnabled || this.cameraBusyCycles || !this.ram.length) return;
@@ -222,6 +241,95 @@
           this.saveRevision++;
         }
       }
+    }
+    readMBC7(address) {
+      if (!this.ramEnabled || !this.mbc7Gate2 || address >= 0xb000) return 255;
+      // No tilt input exists, so the accelerometer always reads its rest position.
+      switch ((address >> 4) & 15) {
+        case 2: case 4: return this.mbc7Latched ? 0xd0 : 0x00;
+        case 3: case 5: return this.mbc7Latched ? 0x81 : 0x80;
+        case 6: return 0x00;
+        case 8: return (this.eepromCS ? 0x80 : 0) | (this.eepromClk ? 0x40 : 0)
+          | (this.eepromDI ? 0x02 : 0) | this.eepromOutput();
+        default: return 255;
+      }
+    }
+    writeMBC7(address, value) {
+      if (!this.ramEnabled || !this.mbc7Gate2 || address >= 0xb000) return;
+      switch ((address >> 4) & 15) {
+        case 0: if (value === 0x55) this.mbc7Latched = false; break;
+        case 1: if (value === 0xaa) this.mbc7Latched = true; break;
+        case 8: this.writeEEPROMPins(value); break;
+      }
+    }
+    eepromOutput() {
+      return this.eepromPhase === 2 ? (this.eepromShift >> (15 - this.eepromCount)) & 1 : 1;
+    }
+    eepromIdle() {
+      this.eepromPhase = 0;
+      this.eepromCount = 0;
+      this.eepromShift = 0;
+    }
+    writeEEPROMPins(value) {
+      const cs = (value & 0x80) !== 0, clk = (value & 0x40) !== 0, di = (value & 0x02) !== 0;
+      const rising = clk && !this.eepromClk;
+      this.eepromCS = cs;
+      this.eepromClk = clk;
+      this.eepromDI = di;
+      if (!cs) { this.eepromIdle(); return; }
+      if (!rising) return;
+      if (this.eepromPhase === 0) {
+        if (di) { this.eepromIdle(); this.eepromPhase = 1; }
+        return;
+      }
+      if (this.eepromPhase === 2) {
+        if (++this.eepromCount === 16) this.eepromIdle();
+        return;
+      }
+      this.eepromShift = (this.eepromShift << 1) | (di ? 1 : 0);
+      this.eepromCount++;
+      if (this.eepromPhase === 1) {
+        if (this.eepromCount < 10) return;
+        const op = (this.eepromShift >> 8) & 3, field = this.eepromShift & 0xff;
+        if (op === 2) {
+          this.eepromShift = this.eepromWord(field & 0x7f);
+          this.eepromPhase = 2;
+          this.eepromCount = 0;
+          return;
+        }
+        if (op === 1 || (op === 0 && (field >> 6) === 1)) {
+          this.eepromPhase = 3;
+          return;
+        }
+        this.eepromIdle();
+        this.runEEPROMCommand(op, field >> 6, field & 0x7f, 0);
+        return;
+      }
+      if (this.eepromCount < 26) return;
+      const op = (this.eepromShift >>> 24) & 3, field = (this.eepromShift >>> 16) & 0xff;
+      const data = this.eepromShift & 0xffff;
+      this.eepromIdle();
+      this.runEEPROMCommand(op, field >> 6, field & 0x7f, data);
+    }
+    runEEPROMCommand(op, sub, address, data) {
+      if (op === 0) {
+        if (sub === 3) this.eepromWriteEnabled = true;
+        else if (sub === 0) this.eepromWriteEnabled = false;
+        else if (sub === 2) { for (let word = 0; word < 128; word++) this.setEEPROMWord(word, 0xffff); }
+        else { for (let word = 0; word < 128; word++) this.setEEPROMWord(word, data); }
+      } else if (op === 1) this.setEEPROMWord(address, data);
+      else if (op === 3) this.setEEPROMWord(address, 0xffff);
+    }
+    eepromWord(address) {
+      return (this.ram[address * 2] << 8) | this.ram[address * 2 + 1];
+    }
+    setEEPROMWord(address, value) {
+      if (!this.eepromWriteEnabled) return;
+      const high = value >> 8, low = value & 0xff;
+      if (this.ram[address * 2] === high && this.ram[address * 2 + 1] === low) return;
+      this.ram[address * 2] = high;
+      this.ram[address * 2 + 1] = low;
+      this.saveRevision++;
     }
     exportRAM() { return this.ram.slice(); }
     importRAM(bytes) {

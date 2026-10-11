@@ -6,6 +6,7 @@ Les changements notables de chaque version sont consignés ici.
 
 ### Ajouté
 
+- GB/GBC : cartouches MBC7 (type `0x22`, utilisées par Kirby Tilt 'n' Tumble et Command Master). La mémoire EEPROM 93LC56 (256 octets, sauvegardée en `.sav`) et les commandes READ, WRITE, ERASE, WRAL, ERAL, EWEN et EWDS sont émulées, ainsi que la double activation de la RAM. L'accéléromètre est émulé au repos : il n'y a pas d'entrée d'inclinaison.
 - GBA : sauvegardes d'état (slots, sauvegarde et chargement rapides, export/import `.state` et aperçu), comme pour GB/GBC. Le format `v3ry-pocket-color-gba-state` est distinct de celui du GB/GBC ; un état ne se charge que dans la même ROM et est entièrement validé avant d'être appliqué.
 - GBA : pilote sonore HLE pour les services BIOS 0x1A à 0x24, 0x28 et 0x29 (init, mode, main, VSync, clear, start, stop, continue, fade-out). Seuls les canaux carrés 1 et 2 du PSG sont joués. Le format de partition est documenté dans `gba/emulator.js`. Il n'a été validé que par des tests synthétiques : aucun jeu testé n'appelle ces services, et les noms BIOS exacts restent à confirmer. `SoundGetJumpList` (0x2A) remplit la table de 36 entrées avec des zéros : les appels passant par ces entrées ne sont pas reproduits.
 - GBA : service BIOS `MultiBoot` (0x25) sans partenaire de liaison. Aucun esclave ne répond, donc aucun client n'est marqué et rien n'est envoyé.
