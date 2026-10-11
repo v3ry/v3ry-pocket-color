@@ -38,13 +38,14 @@ function worker() {
 test("service worker precaches only existing application assets and serves offline routes", async () => {
   const w = worker();
   await w.lifecycle("install");
-  assert.equal(w.storage.size, 29);
+  assert.equal(w.storage.size, 31);
   assert.equal(w.storage.has("https://example.test/pocket/gba/audio.js"), true);
   for (const url of w.storage.keys()) assert.ok(fs.existsSync(path.join(__dirname, "..", new URL(url).pathname.slice("/pocket/".length))));
   assert.equal((await w.request(w.scope)).url, w.scope + "index.html");
   assert.equal((await w.request(w.scope + "app.js?version=1")).cached, true);
   assert.equal((await w.request(w.scope + "gbc/emulator.js?version=1")).cached, true);
   assert.equal((await w.request(w.scope + "gbc/preset/pokemon-red.js")).cached, true);
+  assert.equal((await w.request(w.scope + "gbc/preset/pokemon-yellow.js")).cached, true);
   assert.equal((await w.request(w.scope + "gba/emulator.js")).cached, true);
   assert.equal(w.network.length, 0);
   await w.lifecycle("activate");
@@ -70,7 +71,7 @@ test("service worker never intercepts ROM, ZIP, saves, cross-origin or write req
   }
   assert.equal(await w.request("https://other.test/pocket/app.js"), null);
   assert.equal(await w.request(w.scope + "app.js", "POST"), null);
-  assert.equal(w.storage.size, 29);
+  assert.equal(w.storage.size, 31);
   assert.equal(w.network.length, 0);
 });
 

@@ -1,11 +1,11 @@
 "use strict";
 
 // Bump this version whenever a cached application file changes.
-const CACHE = "v3ry-pocket-color-app-v56";
+const CACHE = "v3ry-pocket-color-app-v57";
 const ASSETS = ["index.html", "styles.css", "gbc/cpu.js", "gbc/cartridge.js", "gbc/audio.js",
   "gbc/emulator.js", "gbc/printer.js", "zip.js", "gbc/saves.js", "gbc/states.js", "gbc/graphics.js", "app.js", "pwa.js",
   "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "gbc/preset/aladdin.js",
-  "gbc/preset/pokemon-crystal.js", "gbc/preset/pokemon-red.js", "gbc/world.js", "gbc/scene.js",
+  "gbc/preset/pokemon-crystal.js", "gbc/preset/gen1-engine.js", "gbc/preset/pokemon-red.js", "gbc/preset/pokemon-yellow.js", "gbc/world.js", "gbc/scene.js",
   "gba/cpu.js", "gba/rtc.js", "gba/cartridge.js", "gba/audio.js", "gba/graphics.js", "gba/emulator.js", "gba/states.js"];
 const urls = new Set(ASSETS.map(name => new URL(name, self.registration.scope).href));
 const indexURL = new URL("index.html", self.registration.scope).href;

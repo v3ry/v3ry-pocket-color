@@ -19,6 +19,7 @@ const Scene = require("../gbc/scene.js");
 const AladdinPreset = require("../gbc/preset/aladdin.js");
 const CrystalPreset = require("../gbc/preset/pokemon-crystal.js");
 const RedPreset = require("../gbc/preset/pokemon-red.js");
+const YellowPreset = require("../gbc/preset/pokemon-yellow.js");
 
 class Element {
   constructor() {
@@ -132,7 +133,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketStates: States,
     PocketGBAStates: GBAStates,
     PocketGraphics: Graphics,
-    PocketPresets: [AladdinPreset, CrystalPreset, RedPreset],
+    PocketPresets: [AladdinPreset, CrystalPreset, RedPreset, YellowPreset],
     PocketScene: { ...Scene, Renderer: class {
       render2D(game, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.filtered2D = (scope.filtered2D || 0) + 1; return { smoothed: true }; }
       render(game, preset, camera, mode, smoothing, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.sceneMode = mode; scope.sceneSmoothing = smoothing; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360, smoothed: smoothing }; }
@@ -196,7 +197,7 @@ test("HTML loads the relocated GB/GBC browser scripts in dependency order", () =
   assert.equal(typeof scope.PocketGraphics.inspect, "function");
   assert.equal(typeof scope.PocketWorld.build, "function");
   assert.equal(typeof scope.PocketScene.Renderer, "function");
-  assert.equal(scope.PocketPresets.length, 3);
+  assert.equal(scope.PocketPresets.length, 4);
   assert.equal(typeof scope.PocketGameBoyAdvance, "function");
   assert.equal(typeof scope.PocketGBAAPU, "function");
   const gba = new scope.PocketGameBoyAdvance(makeGBADemo());
@@ -655,6 +656,27 @@ test("French Red exposes both render modes and a cartridge-specific label withou
   await load(h, "red.gb", rom);
   assert.equal(h.evaluate("scenePreset.id"), RedPreset.id);
   assert.equal(h.element("#world-option").textContent, "3D · Pokémon Rouge FR");
+  assert.equal(h.element("#world-option").disabled, false);
+  await h.element("#pause-button").fire("click");
+  const before = structuredClone(h.store.records);
+  for (const mode of ["2.5d", "3d", "2d"]) {
+    h.element("#render-mode").value = mode; h.element("#render-mode").fire("change");
+    assert.equal(h.evaluate("paused"), true);
+  }
+  assert.deepEqual(h.store.records, before);
+});
+
+test("Pokémon Jaune selects its own preset label and render modes without changing saves", async () => {
+  const h = harness(), rom = makeROM({ color: true, type: 0x1b, sizeCode: 5, ramSize: 3, program: [0x18, 0xfe] });
+  rom.fill(0, 0x134, 0x144);
+  rom.set(Buffer.from("POKEMON YEL"), 0x134);
+  rom[0x143] = 0x80; rom[0x14c] = 0; rom[0x14e] = 0xb7; rom[0x14f] = 0xc1;
+  let checksum = 0;
+  for (let i = 0x134; i <= 0x14c; i++) checksum = (checksum - rom[i] - 1) & 255;
+  rom[0x14d] = checksum;
+  await load(h, "yellow.gbc", rom);
+  assert.equal(h.evaluate("scenePreset.id"), YellowPreset.id);
+  assert.equal(h.element("#world-option").textContent, "3D · Pokémon Jaune");
   assert.equal(h.element("#world-option").disabled, false);
   await h.element("#pause-button").fire("click");
   const before = structuredClone(h.store.records);
