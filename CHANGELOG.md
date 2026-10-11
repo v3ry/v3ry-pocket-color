@@ -15,6 +15,8 @@ Les changements notables de chaque version sont consignés ici.
 
 ### Corrigé
 
+- GBA : une IRQ imbriquée dans un gestionnaire d'interruption ne remet plus le processeur en attente d'`IntrWait` à son retour : le processeur restait figé au milieu du gestionnaire, le VBlank masqué n'était jamais traité et le jeu appelait ensuite un pointeur nul (007 Everything or Nothing redémarrait vers l'image 2442).
+- GBA : à la fin d'un gestionnaire, `IntrWait` se termine immédiatement si l'interruption attendue a été signalée pendant que le gestionnaire la masquait, au lieu d'attendre le VBlank suivant (image perdue).
 - GBA : un registre de contrôle DMA avec contrôle de source réservé (3) incrémente l'adresse au lieu d'arrêter l'émulation ; le DMA0 en démarrage spécial (interdit) ne s'arrête plus et ne transfère rien.
 - GBA : une écriture de PC avec le bit S en mode User/System, qui n'a pas de SPSR, laisse CPSR inchangé au lieu d'arrêter l'émulation.
 - GBA : un encodage `STRD` (indéfini sur ARMv4) n'est plus décodé comme `MSR`.

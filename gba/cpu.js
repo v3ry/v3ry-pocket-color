@@ -78,7 +78,7 @@
       this.irqFrames.push({
         returnAddress, cpsr: this.cpsr, registers: this.r.slice(0, 4), r12: this.r[12],
         irqLR: (this.cpsr & 31) === 0x12 ? this.r[14] : null, saved: this.saved.get(0x12),
-        waiting: !!this.bus.waitMask
+        waiting: !!this.bus.waitMask && !!this.bus.halted
       });
       this.saved.set(0x12, this.cpsr);
       this.status((this.cpsr & ~63) | 0x92);
@@ -170,7 +170,7 @@
         if (frame.irqLR !== null) this.r[14] = frame.irqLR;
         if (frame.saved === undefined) this.saved.delete(0x12); else this.saved.set(0x12, frame.saved);
         this.branch(frame.returnAddress);
-        if (frame.waiting && this.bus.waitMask) this.bus.halted = true;
+        if (frame.waiting && this.bus.waitMask) this.bus.resumeWait();
         return 6;
       }
       if (this.address < 0x4000) {

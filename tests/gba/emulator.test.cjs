@@ -180,6 +180,40 @@ test("an IRQ taken during IntrWait runs its handler immediately, then resumes wa
   g.interrupt(1); assert.equal(g.halted, false); assert.equal(g.waitMask, 0);
 });
 
+test("an IRQ nested inside a handler returns to that handler without re-entering the IntrWait halt", () => {
+  const g = game(), c = g.cpu;
+  g.write32(0x03007ffc, 0x03000000); g.write32(0x03000000, 0xe12fff1e);
+  g.write16(0x04000200, 5);
+  c.cpsr = 0x1f; c.r[15] = 0x080000c0;
+  g.swi(5);
+  g.interrupt(4); g.runCycles(1);
+  assert.equal(c.irqFrames.length, 1); assert.equal(g.halted, false);
+  g.setIO16(0x202, 0); c.cpsr &= ~128; c.r[15] = 0x03000100;
+  g.interrupt(4); g.runCycles(1);
+  assert.equal(c.irqFrames.length, 2); g.setIO16(0x202, 0);
+  g.runCycles(1);
+  assert.equal(c.r[15], 0x03000100); assert.equal(g.halted, false); assert.equal(g.waitMask, 1);
+  c.r[15] = 0x03000000; g.runCycles(1); g.runCycles(1);
+  assert.equal(c.r[15], 0x080000c0); assert.equal(g.halted, true);
+});
+
+test("IntrWait ends as soon as a handler has flagged an interrupt that was masked while it ran", () => {
+  const g = game(), c = g.cpu;
+  g.write32(0x03007ffc, 0x03000000); g.write32(0x03000000, 0xe12fff1e);
+  g.write16(0x04000200, 5);
+  c.cpsr = 0x1f; c.r[15] = 0x080000c0;
+  g.swi(5);
+  g.interrupt(4); g.runCycles(1);
+  g.setIO16(0x202, 0); g.write16(0x04000200, 4);
+  g.interrupt(1);
+  assert.equal(g.waitMask, 1); assert.equal(g.halted, false);
+  g.runCycles(1);
+  assert.equal(c.r[15], 0x080000c0); assert.equal(g.halted, true); assert.equal(g.waitMask, 1);
+  g.write16(0x04000200, 5); g.runCycles(1); g.runCycles(1);
+  assert.equal(c.r[15], 0x080000c0); assert.equal(g.halted, false); assert.equal(g.waitMask, 0);
+  assert.equal(g.read16(0x03007ff8) & 1, 0);
+});
+
 test("HLE division, CpuSet/FastSet, waits and unsupported services", () => {
   const g = game(), r = g.cpu.r;
   r[0] = -17; r[1] = 5; g.swi(6);

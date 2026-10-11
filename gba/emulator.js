@@ -227,6 +227,14 @@
       if (line >= 162) this.setIO16(0xde, control & ~0x8000);
       else if (line >= 2) this.transfer(3);
     }
+    // Back in IntrWait after an IRQ handler: finish if a handler already flagged a waited interrupt, otherwise keep waiting.
+    resumeWait() {
+      const flags = this.read16(0x03007ff8);
+      if (flags & this.waitMask) {
+        this.write16(0x03007ff8, flags & ~this.waitMask);
+        this.waitMask = 0; this.halted = false;
+      } else this.halted = true;
+    }
     interrupt(mask) {
       this.setIO16(0x202, this.io16(0x202) | mask);
       if (this.waitMask & mask & this.io16(0x200)) {
