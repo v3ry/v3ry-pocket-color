@@ -69,6 +69,16 @@ test("Pokémon Jaune builds the Reds' house, Blue's house and Oak's lab as 3D in
   assert.ok(bedroom.objects.some(o => o.kind === "bed"));
 });
 
+test("Pokémon Jaune reads a collision table in the switched ROM bank, even when it is longer than 128 tiles", () => {
+  const game = map(40, 5, 5, 6);
+  game.cartridge.rom.fill(0x11, 0x4300, 0x4300 + 200);
+  game.cartridge.rom[0x4300 + 200] = 255;
+  game.wram.set([0x00, 0x43], 0x1534);
+  const terrain = yellow.terrain(game);
+  assert.equal(terrain.active, true);
+  assert.match(terrain.reason, /relief de Jaune/);
+});
+
 test("Pokémon Jaune reads its battle flag at 0xD05B, not Red's 0xD05C", () => {
   for (const type of [1, 2]) {
     const game = makeRedBattle({ type });

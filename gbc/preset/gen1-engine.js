@@ -248,7 +248,7 @@
         || (anchor - RAM.blocks) % stride >= width + 3
         || Math.floor((anchor - RAM.blocks) / stride) >= height + 3
         || bank < 1 || bank * 16384 >= rom.length || pointer < 0x4000 || pointer >= 0x8000
-        || collision < 1 || collision >= 0x4000 || bgAnchor < 0x9800 || bgAnchor >= 0x9c00) return null;
+        || collision < 1 || collision >= 0x8000 || bgAnchor < 0x9800 || bgAnchor >= 0x9c00) return null;
       const blocks = new Uint8Array(width * height), ids = new Set();
       for (let y = 0; y < height + 6; y++) for (let x = 0; x < stride; x++) {
         const id = ram[RAM.blocks + y * stride + x];
@@ -258,9 +258,10 @@
       if (pointer + (Math.max(...ids) + 1) * 16 > 0x8000
         || bank * 16384 + (pointer & 16383) + (Math.max(...ids) + 1) * 16 > rom.length) return null;
       const walkable = new Set();
-      let end = collision;
-      while (end < Math.min(collision + 128, 0x4000) && rom[end] !== 255) walkable.add(rom[end++]);
-      if (rom[end] !== 255 || !walkable.size) return null;
+      const banked = collision >= 0x4000, limit = Math.min(banked ? (bank + 1) * 16384 : 0x4000, rom.length);
+      let end = banked ? bank * 16384 + collision - 0x4000 : collision;
+      while (end < limit && rom[end] !== 255) walkable.add(rom[end++]);
+      if (end >= limit || rom[end] !== 255 || !walkable.size) return null;
       return { width, height, stride, anchor, bgAnchor, blocks, ids, walkable,
         definitions: bank * 16384 + (pointer & 16383), tileset: ram[RAM.tileset], map: ram[RAM.map] };
     }
