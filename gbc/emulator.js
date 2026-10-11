@@ -69,6 +69,16 @@
       }
       this.serialDevice = device;
     }
+    // Used by a linked console that is the master: completes a transfer this
+    // console is waiting on as the external-clock side. Returns null if not waiting.
+    externalSerialExchange(value) {
+      if ((this.io[2] & 0x81) !== 0x80) return null;
+      const incoming = this.io[1];
+      this.io[1] = value;
+      this.io[2] &= ~128;
+      this.interrupt(3);
+      return incoming;
+    }
     invalidateVideoLayers() {
       const enabled = VIDEO_LAYERS.get(this)?.enabled || false;
       VIDEO_LAYERS.set(this, { writing: layerBuffers(), ready: layerBuffers(), valid: false, enabled,
