@@ -1,6 +1,8 @@
 (function (root) {
   "use strict";
   const Graphics = typeof module !== "undefined" && module.exports ? require("./graphics.js") : root.PocketGraphics;
+  // Vertical sprite rows are foreshortened by the camera pitch (about 0.7 indoors); stretch them back.
+  const CHARACTER_STATURE = 1.4, SHADOW_DEPTH = 0.35, SHADOW_TILE = (9 * 16 + 0.5) / 192;
 
   function materials() {
     const colors = [[94, 155, 54], [73, 120, 42], [129, 185, 68], [99, 72, 40],
@@ -188,12 +190,11 @@
       face([[x + w, y, bottom], [x, y, bottom], [x, y, top], [x + w, y, top]], slot, 0.7);
       face([[x + w, y + d, bottom], [x + w, y, bottom], [x + w, y, top], [x + w, y + d, top]], slot, 0.88);
     }
-    function shadow(x, y, w, d, output = models, elevation = 0) {
-      const u = (9 * 16 + 0.5) / 192;
-      const z = (elevation + 0.12) * scale;
-      quad(output, [[x - 2, y + 2, z], [x + w + 4, y + 2, z],
+    function shadow(x, y, w, d) {
+      const z = 0.12 * scale;
+      quad(models, [[x - 2, y + 2, z], [x + w + 4, y + 2, z],
         [x + w + 9, y + d + 5, z], [x + 3, y + d + 5, z]],
-      [[u, 0], [u, 0], [u, 0], [u, 0]]);
+      [[SHADOW_TILE, 0], [SHADOW_TILE, 0], [SHADOW_TILE, 0], [SHADOW_TILE, 0]]);
     }
     function tree(x, y, tall = true, width = 16, depth = 16) {
       const h = (tall ? 29 : 20) + Math.max(0, width - 16) / 2;
@@ -501,7 +502,6 @@
         && y >= cell.y && y < cell.y + cell.depth)?.height
         ?? world.surfaces?.find(cell => !cell.sculpted && x >= cell.x && x < cell.x + 16
           && y >= cell.y && y < cell.y + 16)?.depth ?? 0;
-      shadow(left + world.originX, bottom - 4 + world.originY, right - left, 4, shadows, component.elevation);
       stats.characters++;
     }
     for (let y = 0; y < 144; y++) for (let x = 0; x < 160;) {
@@ -509,11 +509,15 @@
       if (id < 0) { x++; continue; }
       const left = x;
       while (x < 160 && labels[y * 160 + x] === id) x++;
-      const foot = components[id].bottom;
-      const zTop = (foot - y + components[id].elevation) * scale + 0.2, zBottom = zTop - scale;
+      const { bottom: foot, elevation } = components[id];
+      const zTop = ((foot - y) * CHARACTER_STATURE + elevation) * scale + 0.2, zBottom = zTop - CHARACTER_STATURE * scale;
       quad(sprites, [[left + world.originX, foot + world.originY, zTop], [x + world.originX, foot + world.originY, zTop],
         [x + world.originX, foot + world.originY, zBottom], [left + world.originX, foot + world.originY, zBottom]],
       [[left / 160, y / 144], [x / 160, y / 144], [x / 160, (y + 1) / 144], [left / 160, (y + 1) / 144]]);
+      const from = foot + (foot - y - 1) * SHADOW_DEPTH + world.originY, to = from + SHADOW_DEPTH, z = (elevation + 0.12) * scale;
+      quad(shadows, [[left + world.originX, from, z], [x + world.originX, from, z],
+        [x + world.originX, to, z], [left + world.originX, to, z]],
+      [[SHADOW_TILE, 0], [SHADOW_TILE, 0], [SHADOW_TILE, 0], [SHADOW_TILE, 0]]);
     }
     return { active: true, textures: { ...textures, background: ground }, background: geometry.background,
       models: geometry.models, shadows: new Float32Array(shadows), sprites: new Float32Array(sprites),

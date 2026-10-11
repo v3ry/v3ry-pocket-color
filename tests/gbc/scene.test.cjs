@@ -291,7 +291,7 @@ test("3D has horizontal ground, volumetric trees, pitched roofs, signs and verti
   for (let i = 0; i < world.sprites.length; i += 36) {
     const vertices = world.sprites.slice(i, i + 36);
     assert.equal(vertices[1], vertices[13]);
-    assert.ok(Math.abs(vertices[2] - vertices[14] - 1) < 0.000001);
+    assert.ok(Math.abs(vertices[2] - vertices[14] - 1.4) < 0.000001);
   }
   assert.ok([...world.models, ...world.sprites].every(Number.isFinite));
   const flat = World.build(game, crystal, 0);
@@ -312,6 +312,20 @@ test("3D has horizontal ground, volumetric trees, pitched roofs, signs and verti
   assert.notEqual(World.build(game, crystal, 12).models, world.models);
   setBlock(game, 0, 0, 1);
   assert.equal(World.build(game, crystal, 14).stats.trees, 4);
+});
+
+test("3D character shadows are flattened sprite silhouettes instead of a square footprint", () => {
+  const game = town();
+  for (let y = 0; y < 8; y++) { game.vram[16 + y * 2] = (0xff << (7 - y)) & 0xff; game.vram[17 + y * 2] = 0; }
+  game.oam.set([32, 88, 1, 0, 56, 120, 1, 0]);
+  game.setVideoCapture(true); game.tick(70224);
+  const world = World.build(game, crystal, 14);
+  assert.equal(world.stats.characters, 2);
+  assert.equal(world.shadows.length / 36, 16);
+  const widths = new Set();
+  for (let i = 0; i < world.shadows.length; i += 36) widths.add(world.shadows[i + 6] - world.shadows[i]);
+  assert.deepEqual([...widths].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.ok([...world.shadows].every(Number.isFinite));
 });
 
 test("Crystal preset requires the verified UE 1.1 header and decodes distinct collision heights", () => {
