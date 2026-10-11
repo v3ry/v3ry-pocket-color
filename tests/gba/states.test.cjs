@@ -117,12 +117,12 @@ function clockGame(rom) {
   return game;
 }
 
-// Starts a clock command and leaves the transfer open so the state is captured mid-transaction.
+// Starts a clock command and leaves the transfer open so the state is captured mid-transaction. Commands go MSB first.
 function startCommand(game, command) {
   game.write16(CONTROL, 1);
   game.write16(DIRECTION, 7);
   game.write16(GPIO, 0); game.write16(GPIO, 4);
-  for (let bit = 0; bit < 8; bit++) {
+  for (let bit = 7; bit >= 0; bit--) {
     const sio = command >>> bit & 1;
     game.write16(GPIO, 4 | sio << 1); game.write16(GPIO, 5 | sio << 1);
   }
@@ -142,7 +142,7 @@ function readBits(game, count) {
 test("GBA states carry the real-time clock mid-transaction and continue the same reads", async () => {
   const rom = makeGBA({ signature: "SIIRTC_V" }), key = keyOf(rom);
   const original = clockGame(rom);
-  startCommand(original, 0xa6);
+  startCommand(original, 0x65);
   const restored = clockGame(rom);
   States.restore(restored, await States.decode(States.encode(States.capture(original, key))), key);
   assert.deepEqual(stateOf(restored, key), stateOf(original, key));
@@ -155,7 +155,7 @@ test("GBA states without a clock section reset the link of a clock cartridge", (
   const data = cloneState(States.capture(clockGame(rom), key));
   delete data.rtc;
   const game = clockGame(rom);
-  startCommand(game, 0xa6);
+  startCommand(game, 0x65);
   assert.notEqual(game.cartridge.rtc.phase, "idle");
   States.restore(game, data, key);
   assert.equal(game.cartridge.rtc.phase, "idle");
@@ -171,7 +171,7 @@ test("GBA states refuse a clock section that does not fit the cartridge, leaving
   assert.deepEqual(stateOf(plain, key), before);
 
   const game = clockGame(clockRom);
-  startCommand(game, 0xa6);
+  startCommand(game, 0x65);
   const beforeClock = stateOf(game, key);
   const cases = [
     (d) => { d.rtc.phase = "sleep"; },

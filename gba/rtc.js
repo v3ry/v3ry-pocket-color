@@ -5,8 +5,9 @@
   const SCK = 1, SIO = 2, CS = 4;
   const PORT = 0xc4, DIRECTION = 0xc6, CONTROL = 0xc8;
   const DEFAULT_STATUS = 0x40;
-  const COMMAND_LOW_NIBBLE = 0x6;
-  const STATUS = 1, DATE = 7, TIME = 3;
+  const COMMAND_PREFIX = 0x60;
+  const RESET = 0, STATUS = 1, DATE = 2, TIME = 3;
+  const LENGTH = { [STATUS]: 1, [DATE]: 7, [TIME]: 3 };
 
   function toBCD(value) { return (Math.floor(value / 10) << 4) | (value % 10); }
   function fromBCD(value) {
@@ -70,7 +71,9 @@
         return;
       }
       if (this.phase !== "command" && this.phase !== "write") return;
-      this.value |= sio << this.bits;
+      // Commands arrive MSB first; data bytes arrive LSB first.
+      if (this.phase === "command") this.value = this.value << 1 | sio;
+      else this.value |= sio << this.bits;
       if (++this.bits < 8) return;
       const byte = this.value;
       this.value = 0; this.bits = 0;
@@ -82,15 +85,15 @@
     }
     command(byte) {
       this.phase = "idle";
-      if ((byte & 15) !== COMMAND_LOW_NIBBLE) return;
-      const code = byte >> 4 & 7, reading = (byte & 128) !== 0;
-      if (code === 0) { this.status = DEFAULT_STATUS; return; }
-      if (code !== 1 && code !== 2 && code !== 6) return;
-      this.target = code;
-      this.length = code === 1 ? STATUS : code === 2 ? DATE : TIME;
+      if ((byte & 0xf0) !== COMMAND_PREFIX) return;
+      const register = byte >> 1 & 7, reading = (byte & 1) !== 0;
+      if (register === RESET) { this.status = DEFAULT_STATUS; return; }
+      if (LENGTH[register] === undefined) return;
+      this.target = register;
+      this.length = LENGTH[register];
       if (!reading) { this.phase = "write"; return; }
-      if (code === 1) this.bytes = [this.takeStatus()];
-      else if (code === 2) this.bytes = this.clockBytes();
+      if (register === STATUS) this.bytes = [this.takeStatus()];
+      else if (register === DATE) this.bytes = this.clockBytes();
       else this.bytes = this.clockBytes().slice(4);
       this.phase = "read";
     }
@@ -113,16 +116,16 @@
       this.apply(this.target, this.bytes);
     }
     // Invalid date or time bytes are ignored as a whole, so the clock never lands on an impossible value.
-    apply(code, bytes) {
-      if (code === 1) {
+    apply(register, bytes) {
+      if (register === STATUS) {
         if (bytes[0] !== this.status) { this.status = bytes[0]; this.onChange(); }
         return;
       }
-      const time = code === 2 ? bytes.slice(4) : bytes;
+      const time = register === DATE ? bytes.slice(4) : bytes;
       const hour = hourFromByte(time[0], this.status);
       const minute = fromBCD(time[1] & 127), second = fromBCD(time[2] & 127);
       if (hour < 0 || minute < 0 || minute > 59 || second < 0 || second > 59) return;
-      if (code === 2) {
+      if (register === DATE) {
         const year = fromBCD(bytes[0]), month = fromBCD(bytes[1] & 31), day = fromBCD(bytes[2] & 63);
         if (year < 0 || month < 1 || month > 12 || day < 1 || day > 31) return;
         const next = new Date(2000 + year, month - 1, day, hour, minute, second);

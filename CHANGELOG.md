@@ -20,6 +20,7 @@ Les changements notables de chaque version sont consignés ici.
 
 ### Corrigé
 
+- GBA : l'horloge temps réel (S-3511A) ignorait les commandes d'état. Le code assemblait la commande de bit 0 à bit 7, alors que le matériel l'envoie MSB first avec la forme `0110 rrr r` (registre sur les bits 1 à 3, lecture sur le bit 0). Les commandes de statut (`0x62`/`0x63`) n'étaient donc pas reconnues, et la réinitialisation (`0x60`) n'était pas prise en compte. Les dates et heures, déjà reconnues par chance, ne changent pas.
 - GBA : un DMA répété (sauf mode immédiat) recharge désormais son nombre d'unités depuis le registre `DMAxCNT_L` à chaque déclenchement, comme GBATEK le décrit. Avant, la valeur figée à l'activation était réutilisée, donc une modification du compteur pendant le DMA était ignorée. Le test de priorité confirme que, à déclenchement égal, le DMA le plus bas s'exécute en premier.
 - GBA : le son Direct Sound manquait dans Super Mario Advance. Une demande de remplissage de FIFO faite pendant que le DMA son était désarmé restait bloquée et n'était jamais renouvelée. Chaque dépassement de minuteur demande désormais le remplissage tant que la FIFO contient 16 octets ou moins.
 - GBA : le Direct Sound était envoyé du mauvais côté. Les bits de routage gauche et droite de SOUNDCNT_H et le volume gauche de SOUNDCNT_L étaient inversés.

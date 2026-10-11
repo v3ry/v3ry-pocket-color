@@ -9,7 +9,8 @@ const { RTC } = require("../../gba/rtc.js");
 const { makeGBA } = require("./helpers.cjs");
 
 const GPIO = 0x080000c4, DIRECTION = 0x080000c6, CONTROL = 0x080000c8;
-const READ_STATUS = 0x96, WRITE_STATUS = 0x16, READ_DATE = 0xa6, WRITE_DATE = 0x26, READ_TIME = 0xe6, WRITE_TIME = 0x66;
+// Command bytes as the S-3511A receives them: 0110, the register number, then the read bit. The command goes MSB first.
+const RESET = 0x60, READ_STATUS = 0x63, WRITE_STATUS = 0x62, READ_DATE = 0x65, WRITE_DATE = 0x64, READ_TIME = 0x67, WRITE_TIME = 0x66;
 const fixed = new Date(2026, 4, 17, 13, 5, 9).getTime();
 const game = (clock = fixed) => {
   const g = new GameBoyAdvance(makeGBA({ signature: "SIIRTC_V" }));
@@ -18,12 +19,17 @@ const game = (clock = fixed) => {
 };
 const bcd = value => Math.floor(value / 10) << 4 | value % 10;
 
+function sendBit(g, sio) {
+  g.write16(GPIO, 4 | sio << 1);
+  g.write16(GPIO, 5 | sio << 1);
+}
+// Data bytes go LSB first.
 function sendByte(g, byte) {
-  for (let bit = 0; bit < 8; bit++) {
-    const sio = byte >>> bit & 1;
-    g.write16(GPIO, 4 | sio << 1);
-    g.write16(GPIO, 5 | sio << 1);
-  }
+  for (let bit = 0; bit < 8; bit++) sendBit(g, byte >>> bit & 1);
+}
+// Command bytes go MSB first.
+function sendCommand(g, byte) {
+  for (let bit = 7; bit >= 0; bit--) sendBit(g, byte >>> bit & 1);
 }
 function readByte(g) {
   let byte = 0;
@@ -39,7 +45,7 @@ function transaction(g, command, { send = [], read = 0 } = {}) {
   g.write16(CONTROL, 1);
   g.write16(DIRECTION, 7);
   g.write16(GPIO, 0); g.write16(GPIO, 4);
-  sendByte(g, command);
+  sendCommand(g, command);
   for (const byte of send) sendByte(g, byte);
   g.write16(DIRECTION, 5);
   const out = Array.from({ length: read }, () => readByte(g));
@@ -99,6 +105,13 @@ test("the control register reads back and clears the power-off flag when read", 
   g.cartridge.rtc.status = 0x82;
   assert.deepEqual(transaction(g, READ_STATUS, { read: 1 }), [0x82]);
   assert.deepEqual(transaction(g, READ_STATUS, { read: 1 }), [0x02]);
+});
+
+test("the reset command restores the default status register", () => {
+  const g = game();
+  g.cartridge.rtc.status = 0x82;
+  transaction(g, RESET);
+  assert.deepEqual(transaction(g, READ_STATUS, { read: 1 }), [0x40]);
 });
 
 test("GPIO writes are only taken with 16-bit accesses and the port needs control enabled", () => {
