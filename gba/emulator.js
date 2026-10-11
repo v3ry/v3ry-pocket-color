@@ -41,6 +41,7 @@
       this.timers = Array.from({ length: 4 }, () => ({ counter: 0, reload: 0, phase: 0 }));
       this.dmaStall = 0; this.dmaBusy = false;
       this.serialRemaining = 0;
+      this.link = null; this.linkId = 0;
       this.openBus = 0;
       this.lastStop = null;
       this.resets = [];
@@ -213,23 +214,34 @@
       if (offset === 0x132 || offset === 0x133) this.checkKeys();
     }
     // Without a cable the SI line reads high and no other unit answers, so transfers only time out and report that.
+    // On a cable, the parent starts the transfer and children stay busy until it completes.
     writeSIOCNT(value) {
       value &= 0xffff;
       const mode = value >>> 12 & 3, wasBusy = (this.io[0x128] & 0x80) !== 0;
-      if (mode === 2) value &= ~0x7c;
-      else if (mode < 2) value |= 4;
+      if (mode === 2) {
+        value &= ~0x7c;
+        if (this.link) {
+          value |= this.io16(0x128) & 0x7c;
+          if (this.linkId) value = (value & ~0x80) | (this.io16(0x128) & 0x80);
+        }
+      } else if (mode < 2) value |= 4;
       if (mode === 3) value &= ~0x80;
       if (this.serialRemaining) value |= 0x80;
       this.setIO16(0x128, value);
       if (!(value & 0x80) || wasBusy) return;
       if (mode === 2) {
         this.serialRemaining = Math.round(16 * this.clock / [9600, 38400, 57600, 115200][value & 3]);
+        if (this.link) this.link.begin(this);
       } else if (mode < 2 && value & 1) {
         this.serialRemaining = Math.round((value & 0x1000 ? 32 : 8) * this.clock / (value & 2 ? 2097152 : 262144));
       }
     }
     finishSerial() {
       const control = this.io16(0x128);
+      if (this.link && (control >>> 12 & 3) === 2) {
+        this.link.complete();
+        return;
+      }
       if ((control >>> 12 & 3) === 2) {
         this.setIO16(0x120, this.io16(0x12a));
         for (const offset of [0x122, 0x124, 0x126]) this.setIO16(offset, 0xffff);

@@ -11,7 +11,7 @@
   const TYPED = new Map([Uint8Array, Int8Array, Uint16Array, Int16Array, Uint32Array, Int32Array, Uint8ClampedArray]
     .map(Ctor => [Ctor.name, Ctor]));
   // Diagnostics and derived references stay out of the state; the ROM and the output buffers are rebuilt on load.
-  const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "graphics", "apu", "lastStop", "resets", "serialRemaining"]);
+  const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "graphics", "apu", "lastStop", "resets", "serialRemaining", "link", "linkId"]);
   const CPU_EXCLUDE = new Set(["bus", "shiftCarry"]);
   const CARTRIDGE_EXCLUDE = new Set(["rom", "title", "saveRevision", "rtc"]);
   const RTC_EXCLUDE = new Set(["clock", "onChange"]);
