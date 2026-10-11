@@ -402,11 +402,30 @@ test("HardReset reboots from the cartridge entry point", () => {
   assert.deepEqual(g.resets, [{ frame: 0, caller: 0x08000123 }]);
 });
 
+test("MultiBoot without a link partner marks no client and rejects non-RAM parameter blocks", () => {
+  const g = game(), r = g.cpu.r;
+  g.write8(0x0200001e, 0x0e); r[0] = 0x02000000; r[1] = 1;
+  g.swi(0x25);
+  assert.equal(g.read8(0x0200001e), 0);
+  r[0] = 0x08000000;
+  assert.throws(() => g.swi(0x25), error => error.kind === "swi" && error.report.swi === 0x25);
+});
+
+test("SoundGetJumpList clears the 36-entry table and advances the buffer pointer", () => {
+  const g = game(), r = g.cpu.r;
+  for (let offset = 0; offset < 144; offset += 4) g.write32(0x03000100 + offset, 0x12345678);
+  r[0] = 0x03000100; g.swi(0x2a);
+  for (let offset = 0; offset < 144; offset += 4) assert.equal(g.read32(0x03000100 + offset), 0);
+  assert.equal(r[0], 0x03000100 + 144);
+  r[0] = 0x08000000;
+  assert.throws(() => g.swi(0x2a), error => error.kind === "swi" && error.report.swi === 0x2a);
+});
+
 test("an unsupported BIOS service records where it was requested", () => {
   const g = game();
   g.cpu.address = 0x08000010;
-  assert.throws(() => g.swi(0x2a), error => {
-    assert.equal(error.kind, "swi"); assert.equal(error.report.swi, 0x2a);
+  assert.throws(() => g.swi(0x2b), error => {
+    assert.equal(error.kind, "swi"); assert.equal(error.report.swi, 0x2b);
     assert.equal(error.report.pc, 0x08000010); assert.equal(g.lastStop, error.report);
     return /a 0x8000010/.test(error.message);
   });

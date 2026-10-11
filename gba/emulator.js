@@ -489,6 +489,8 @@
       }
       if (number === 0x26) { this.reset(this.cpu.r[14]); return; }
       if (number === 0x27) { this.write8(0x04000301, r[2] & 255); return; }
+      if (number === 0x25) { this.multiboot(r[0]); return; }
+      if (number === 0x2a) { this.soundJumpList(r[0]); return; }
       throw this.cpu.fail("swi", `Service BIOS GBA non pris en charge : SWI 0x${number.toString(16)} a 0x${this.cpu.address.toString(16)}.`,
         { swi: number });
     }
@@ -509,6 +511,24 @@
     inSoundArea(address, size) {
       address >>>= 0;
       return SOUND_AREAS.some(([start, end]) => address >= start && address + size <= end);
+    }
+    ramPointer(number, address, size) {
+      if (!this.inSoundArea(address, size)) {
+        throw this.cpu.fail("swi", `Service BIOS GBA : pointeur 0x${(address >>> 0).toString(16)} hors IWRAM/EWRAM a 0x${this.cpu.address.toString(16)}.`,
+          { swi: number });
+      }
+      return address >>> 0;
+    }
+    // No link partner answers the multiboot handshake, so the parameter block records no client and nothing is uploaded.
+    multiboot(param) {
+      this.write8(this.ramPointer(0x25, param, 0x1f) + 0x1e, 0);
+    }
+    // The BIOS table holds code addresses this HLE driver does not provide, so every entry is zero (the value GBATEK
+    // gives invalid entries). A call through a zero entry restarts the console, as any jump to address 0 does.
+    soundJumpList(buffer) {
+      const address = this.ramPointer(0x2a, buffer, 144);
+      for (let offset = 0; offset < 144; offset += 4) this.write32(address + offset, 0);
+      this.cpu.r[0] = (address + 144) >>> 0;
     }
     soundPointer(number, address, size) {
       if (!this.inSoundArea(address, size)) {

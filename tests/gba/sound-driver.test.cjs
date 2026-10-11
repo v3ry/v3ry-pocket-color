@@ -139,7 +139,8 @@ test("sound driver rejects player and song pointers outside work RAM", () => {
   assert.throws(() => call(g, 0x21, PLAYER, 0x08000000), error => error.kind === "swi" && error.report.swi === 0x21);
 });
 
-test("sound driver SoundGetJumpList stays unsupported", () => {
+test("sound driver SoundGetJumpList works without an initialised driver", () => {
   const g = game();
-  assert.throws(() => g.swi(0x2a), /Service BIOS/);
+  g.cpu.r[0] = 0x03000200; g.swi(0x2a);
+  assert.equal(g.cpu.r[0], 0x03000200 + 144);
 });
