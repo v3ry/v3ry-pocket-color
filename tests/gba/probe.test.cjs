@@ -14,10 +14,10 @@ test("probe reports the first unsupported instruction with its address and regis
 });
 
 test("probe counts BIOS services and names the first unsupported one", () => {
-  const result = probe(makeGBA({ program: [0xef0b0000, 0xef1a0000] }), { frames: 3 });
-  assert.equal(result.stop.kind, "swi"); assert.equal(result.stop.swi, 0x1a);
-  assert.deepEqual([...result.services], [[0x0b, 1], [0x1a, 1]]);
-  assert.deepEqual(JSON.parse(format(result)).services, { "0xb": 1, "0x1a": 1 });
+  const result = probe(makeGBA({ program: [0xef0b0000, 0xef2a0000] }), { frames: 3 });
+  assert.equal(result.stop.kind, "swi"); assert.equal(result.stop.swi, 0x2a);
+  assert.deepEqual([...result.services], [[0x0b, 1], [0x2a, 1]]);
+  assert.deepEqual(JSON.parse(format(result)).services, { "0xb": 1, "0x2a": 1 });
 });
 
 test("probe runs a supported ROM to the requested frame without a stop", () => {

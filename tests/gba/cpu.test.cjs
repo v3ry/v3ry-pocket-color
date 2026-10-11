@@ -143,7 +143,7 @@ test("Thumb conditional branches and paired BL compute signed destinations", () 
 test("unknown ARM/Thumb instructions and BIOS calls fail explicitly", () => {
   assert.throws(() => cpu([0xee000000]).step(), /Instruction GBA/);
   assert.throws(() => cpu([0xde00], true).step(), /Instruction GBA/);
-  assert.throws(() => cpu([0xef1a0000]).step(), /Service BIOS/);
+  assert.throws(() => cpu([0xef2a0000]).step(), /Service BIOS/);
 });
 
 test("unsupported stops carry a structured report locating the failure", () => {
@@ -157,8 +157,8 @@ test("unsupported stops carry a structured report locating the failure", () => {
   });
   const thumb = cpu([0xde00], true);
   assert.throws(() => thumb.step(), error => error.report.thumb === true && error.report.opcode === 0xde00);
-  const swi = cpu([0xef1a0000]);
-  assert.throws(() => swi.step(), error => error.kind === "swi" && error.report.swi === 0x1a && error.report.pc === 0x080000c0);
+  const swi = cpu([0xef2a0000]);
+  assert.throws(() => swi.step(), error => error.kind === "swi" && error.report.swi === 0x2a && error.report.pc === 0x080000c0);
 });
 
 function resetRegisters(c, thumb) {

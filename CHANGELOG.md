@@ -4,9 +4,14 @@ Les changements notables de chaque version sont consignés ici.
 
 ## [Non publié]
 
+### Ajouté
+
+- GBA : pilote sonore HLE pour les services BIOS 0x1A à 0x24, 0x28 et 0x29 (init, mode, main, VSync, clear, start, stop, continue, fade-out). Seuls les canaux carrés 1 et 2 du PSG sont joués. Le format de partition est documenté dans `gba/emulator.js`. Il n'a été validé que par des tests synthétiques : aucun jeu testé n'appelle ces services, et les noms BIOS exacts restent à confirmer. `SoundGetJumpList` (0x2A) reste non pris en charge.
+
 ### Corrigé
 
 - GBA : le son Direct Sound manquait dans Super Mario Advance. Une demande de remplissage de FIFO faite pendant que le DMA son était désarmé restait bloquée et n'était jamais renouvelée. Chaque dépassement de minuteur demande désormais le remplissage tant que la FIFO contient 16 octets ou moins.
+- GBA : le Direct Sound était envoyé du mauvais côté. Les bits de routage gauche et droite de SOUNDCNT_H et le volume gauche de SOUNDCNT_L étaient inversés.
 
 ## [0.11.0] - 2026-10-11
 

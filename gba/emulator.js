@@ -7,6 +7,17 @@
   const Graphics = commonJS ? require("./graphics.js").Graphics : root.PocketGBAGraphics;
   const APU = commonJS ? require("./audio.js").APU : root.PocketGBAAPU;
   const SINE = Array.from({ length: 256 }, (_, angle) => Math.trunc(Math.sin(angle * Math.PI / 128) * 16384));
+  // Internal sound driver format (HLE, not the Nintendo BIOS layout). Work areas and players must sit in IWRAM or EWRAM.
+  // Player (24 bytes): +0 song pointer, +4 status (1 stopped, 2 playing), +8 event cursor, +12 frames left in the
+  // current event, +16 fade frames left, +18 fade frames total, +20 velocity of the sounding note, +21 voice (channel + 1, 0 when silent).
+  // Song event (8 bytes): +0 type (0 end, 1 note, 2 rest), +1 channel (0 or 1, square waves), +2 key, +3 velocity (0-15),
+  // +4 frames (u16, 0 counts as 1). Notes and rests run one after another, one sounding note per player.
+  const SOUND_AREAS = [[0x02000000, 0x02040000], [0x03000000, 0x03008000]];
+  const SQUARE = [
+    { duty: 0x62, envelope: 0x63, low: 0x64, high: 0x65 },
+    { duty: 0x68, envelope: 0x69, low: 0x6c, high: 0x6d },
+  ];
+  const PLAYER_SIZE = 24, EVENT_SIZE = 8, EVENT_END = 0, EVENT_NOTE = 1, EVENT_REST = 2;
 
   class GameBoyAdvance {
     constructor(bytes, sampleRate = 48000) {
@@ -31,6 +42,7 @@
       this.dmaStall = 0; this.dmaBusy = false;
       this.lastStop = null;
       this.resets = [];
+      this.soundDriver = { area: 0, mode: 0, vsync: true, vsyncCount: 0, players: new Set() };
       this.setIO16(0, 128); this.setIO16(0x130, 0x3ff);
       this.setIO16(4, 4);
       for (const offset of [0x20, 0x26, 0x30, 0x36]) this.setIO16(offset, 256);
@@ -418,10 +430,142 @@
         r[0] = Math.trunc(frequency / 2 ** ((180 - key - fine / 256) / 12));
         return;
       }
+      if (number >= 0x1a && number <= 0x24 || number === 0x28 || number === 0x29) {
+        this.soundService(number); return;
+      }
       if (number === 0x26) { this.reset(this.cpu.r[14]); return; }
       if (number === 0x27) { this.write8(0x04000301, r[2] & 255); return; }
       throw this.cpu.fail("swi", `Service BIOS GBA non pris en charge : SWI 0x${number.toString(16)} a 0x${this.cpu.address.toString(16)}.`,
         { swi: number });
+    }
+    soundService(number) {
+      const r = this.cpu.r, driver = this.soundDriver;
+      if (number === 0x1a) { this.soundInit(number, r[0]); return; }
+      if (number === 0x1b) { driver.mode = r[0] >>> 0; return; }
+      if (number === 0x1c) { this.soundMain(); return; }
+      if (number === 0x1d) { driver.vsyncCount = (driver.vsyncCount + 1) >>> 0; return; }
+      if (number === 0x1e) { this.soundClear(); return; }
+      if (number === 0x20) { this.soundOpen(number, r[0]); return; }
+      if (number === 0x21) { this.soundStart(number, r[0], r[1]); return; }
+      if (number === 0x22) { this.soundStop(number, r[0]); return; }
+      if (number === 0x23) { this.soundContinue(number, r[0]); return; }
+      if (number === 0x24) { this.soundFadeOut(number, r[0], r[1] & 0xffff); return; }
+      driver.vsync = number === 0x29;
+    }
+    inSoundArea(address, size) {
+      address >>>= 0;
+      return SOUND_AREAS.some(([start, end]) => address >= start && address + size <= end);
+    }
+    soundPointer(number, address, size) {
+      if (!this.inSoundArea(address, size)) {
+        throw this.cpu.fail("swi", `Pilote sonore : pointeur 0x${(address >>> 0).toString(16)} hors IWRAM/EWRAM a 0x${this.cpu.address.toString(16)}.`,
+          { swi: number });
+      }
+      return address >>> 0;
+    }
+    soundInit(number, area) {
+      this.soundPointer(number, area, 4);
+      this.soundDriver.area = area >>> 0;
+      this.writeIO(0x84, 0x80);
+      this.write16(0x04000080, 0xff77);
+      this.write16(0x04000082, 0x0002);
+      for (const square of SQUARE) this.writeIO(square.envelope, 0);
+    }
+    soundOpen(number, player) {
+      this.soundPointer(number, player, PLAYER_SIZE);
+      if (this.soundDriver.players.has(player)) this.silencePlayer(player);
+      for (let offset = 0; offset < PLAYER_SIZE; offset += 4) this.write32(player + offset, 0);
+      this.write32(player + 4, 1);
+      this.soundDriver.players.add(player);
+    }
+    soundStart(number, player, song) {
+      this.soundPointer(number, player, PLAYER_SIZE);
+      this.soundPointer(number, song, EVENT_SIZE);
+      this.silencePlayer(player);
+      this.write32(player, song >>> 0); this.write32(player + 8, song >>> 0);
+      this.write32(player + 4, 2); this.write16(player + 16, 0); this.write16(player + 18, 0);
+      this.soundDriver.players.add(player);
+      this.beginEvent(player);
+    }
+    soundStop(number, player) {
+      this.soundPointer(number, player, PLAYER_SIZE);
+      this.silencePlayer(player);
+      this.write32(player + 4, 1); this.write16(player + 16, 0); this.write16(player + 18, 0);
+    }
+    soundContinue(number, player) {
+      this.soundPointer(number, player, PLAYER_SIZE);
+      if (this.read32(player + 4) === 2 || !this.read32(player + 12)) return;
+      this.write32(player + 4, 2);
+      this.soundEvent(player);
+    }
+    soundFadeOut(number, player, frames) {
+      this.soundPointer(number, player, PLAYER_SIZE);
+      if (this.read32(player + 4) !== 2) return;
+      if (!frames) { this.endPlayer(player); return; }
+      this.write16(player + 16, frames); this.write16(player + 18, frames);
+      this.applyFade(player);
+    }
+    soundClear() {
+      for (const player of this.soundDriver.players) this.endPlayer(player);
+      for (const square of SQUARE) this.writeIO(square.envelope, 0);
+    }
+    soundMain() {
+      for (const player of this.soundDriver.players) {
+        if (this.read32(player + 4) !== 2) continue;
+        if (this.read16(player + 18)) {
+          const left = this.read16(player + 16) - 1;
+          if (left <= 0) { this.endPlayer(player); continue; }
+          this.write16(player + 16, left);
+          this.applyFade(player);
+        }
+        const remaining = this.read32(player + 12) - 1;
+        if (remaining > 0) { this.write32(player + 12, remaining); continue; }
+        this.write32(player + 8, this.read32(player + 8) + EVENT_SIZE);
+        this.beginEvent(player);
+      }
+    }
+    beginEvent(player) {
+      const cursor = this.read32(player + 8);
+      if (!this.inSoundArea(cursor, EVENT_SIZE)) { this.endPlayer(player); return; }
+      const type = this.read8(cursor), channel = this.read8(cursor + 1);
+      if ((type !== EVENT_NOTE && type !== EVENT_REST) || channel > 1) { this.endPlayer(player); return; }
+      this.write32(player + 12, this.read16(cursor + 4) || 1);
+      this.soundEvent(player);
+    }
+    soundEvent(player) {
+      const cursor = this.read32(player + 8);
+      const type = this.read8(cursor), channel = this.read8(cursor + 1);
+      this.silencePlayer(player);
+      if (type !== EVENT_NOTE) return;
+      const key = this.read8(cursor + 2) & 127, velocity = this.read8(cursor + 3) & 15;
+      const hz = 440 * 2 ** ((key - 69) / 12);
+      const period = Math.min(2047, Math.max(0, Math.round(2048 - 131072 / hz)));
+      const square = SQUARE[channel];
+      this.write8(player + 20, velocity);
+      this.writeIO(square.duty, 0x80);
+      this.writeIO(square.envelope, this.volumeOf(player, velocity) << 4);
+      this.writeIO(square.low, period & 255);
+      this.writeIO(square.high, 0x80 | period >> 8);
+      this.write8(player + 21, channel + 1);
+    }
+    volumeOf(player, velocity) {
+      const total = this.read16(player + 18);
+      return total ? Math.round(velocity * this.read16(player + 16) / total) : velocity;
+    }
+    applyFade(player) {
+      // The PSG envelope is kept at zero period for driver notes, so the fade sets the channel volume directly.
+      const voice = this.read8(player + 21);
+      if (voice === 1 || voice === 2) this.apu.psg.channels[voice - 1].volume = this.volumeOf(player, this.read8(player + 20));
+    }
+    silencePlayer(player) {
+      const voice = this.read8(player + 21);
+      if (voice === 1 || voice === 2) this.writeIO(SQUARE[voice - 1].envelope, 0);
+      this.write8(player + 21, 0);
+    }
+    endPlayer(player) {
+      this.silencePlayer(player);
+      this.write32(player + 4, 1); this.write32(player + 12, 0);
+      this.write16(player + 16, 0); this.write16(player + 18, 0);
     }
     affine(number) {
       const r = this.cpu.r, background = number === 0x0e, stride = background ? 2 : r[3];

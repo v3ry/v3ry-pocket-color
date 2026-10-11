@@ -37,6 +37,20 @@ test("GBA PSG register writes clock all four channels and return status bits", (
   assert.equal(g.apu.drain().length, 0);
 });
 
+test("Direct Sound routing keeps left and right sides separate", () => {
+  const g = game();
+  g.write16(0x04000084, 0x0080);
+  g.write16(0x04000082, 0x0204);
+  g.apu.fifos[0].output = 64;
+  g.apu.sample();
+  assert.ok(g.apu.sampleLeft > 0.1);
+  assert.equal(g.apu.sampleRight, 0);
+  g.write16(0x04000082, 0x0104);
+  g.apu.sample();
+  assert.equal(g.apu.sampleLeft, 0);
+  assert.ok(g.apu.sampleRight > 0.1);
+});
+
 test("Direct Sound mixes signed FIFO samples at the selected timer rate", () => {
   const g = game();
   g.write16(0x04000084, 0x0080);

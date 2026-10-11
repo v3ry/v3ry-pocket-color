@@ -224,7 +224,7 @@ test("HLE division, CpuSet/FastSet, waits and unsupported services", () => {
   g.write16(0x04000200, 1);
   r[0] = 1; r[1] = 1; g.swi(4); assert.equal(g.halted, true);
   g.interrupt(1); assert.equal(g.halted, false);
-  assert.throws(() => g.swi(0x1a), /Service BIOS/);
+  assert.throws(() => g.swi(0x2a), /Service BIOS/);
 });
 
 test("BIOS ArcTan and ArcTan2 use signed 1.14 inputs and return wrapped GBA angles", () => {
@@ -405,8 +405,8 @@ test("HardReset reboots from the cartridge entry point", () => {
 test("an unsupported BIOS service records where it was requested", () => {
   const g = game();
   g.cpu.address = 0x08000010;
-  assert.throws(() => g.swi(0x1a), error => {
-    assert.equal(error.kind, "swi"); assert.equal(error.report.swi, 0x1a);
+  assert.throws(() => g.swi(0x2a), error => {
+    assert.equal(error.kind, "swi"); assert.equal(error.report.swi, 0x2a);
     assert.equal(error.report.pc, 0x08000010); assert.equal(g.lastStop, error.report);
     return /a 0x8000010/.test(error.message);
   });

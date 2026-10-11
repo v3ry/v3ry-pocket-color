@@ -119,7 +119,8 @@
       const channel0 = this.psg.sampleChannel(0), channel1 = this.psg.sampleChannel(1);
       const channel2 = this.waveSample(), channel3 = this.psg.sampleChannel(3);
       for (let side = 0; side < 2; side++) {
-        const shift = side ? 12 : 8, volume = side ? control >>> 4 & 7 : control & 7;
+        const left = side === 0;
+        const shift = left ? 12 : 8, volume = left ? control >>> 4 & 7 : control & 7;
         let mixed = 0, psg = 0;
         if (control & 1 << shift) psg += channel0;
         if (control & 1 << (shift + 1)) psg += channel1;
@@ -127,13 +128,13 @@
         if (control & 1 << (shift + 3)) psg += channel3;
         mixed += psg * psgVolume * (volume + 1) / 28;
         for (let index = 0; index < 2; index++) {
-          const routeBit = (index ? 12 : 8) + (side ? 1 : 0);
+          const routeBit = (index ? 12 : 8) + (left ? 1 : 0);
           if (!(direct & 1 << routeBit)) continue;
           const scale = direct & (1 << (2 + index)) ? 1 : 0.5;
           mixed += this.fifos[index].output / 128 * scale * 0.25;
         }
-        if (side) this.sampleRight = mixed;
-        else this.sampleLeft = mixed;
+        if (left) this.sampleLeft = mixed;
+        else this.sampleRight = mixed;
       }
     }
     tick(cycles) {
