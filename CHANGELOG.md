@@ -2,7 +2,7 @@
 
 Les changements notables de chaque version sont consignés ici.
 
-## [Non publié]
+## [0.11.0] - 2026-10-11
 
 ### Ajouté
 
