@@ -37,6 +37,8 @@ const preferencesStatus = document.querySelector("#preferences-status");
 const gamepadStatus = document.querySelector("#gamepad-status");
 const fpsToggle = document.querySelector("#show-fps");
 const fpsStatus = document.querySelector("#fps-status");
+const themeSelect = document.querySelector("#theme-select");
+const themeColor = document.querySelector('meta[name="theme-color"]');
 const speedInput = document.querySelector("#playback-speed");
 const comfortStatus = document.querySelector("#comfort-status");
 let playbackSpeed = 1;
@@ -124,6 +126,17 @@ let immersiveFallback = false;
 let fullscreenBusy = false;
 let fullscreenIdleTimer = 0;
 let gamepadError = "";
+const themes = ["system", "light", "dark"];
+let theme = "system";
+const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+function applyTheme() {
+  const dark = theme === "dark" || (theme === "system" && Boolean(darkQuery?.matches));
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  themeColor.content = dark ? "#0e1511" : "#f4f5ed";
+}
+darkQuery?.addEventListener("change", () => {
+  if (theme === "system") applyTheme();
+});
 const audioSources = new Set();
 const heldKeys = new Set();
 const heldPointers = new Map();
@@ -144,7 +157,7 @@ function keyboardSummary() {
 function persistPreferences() {
   try {
     window.localStorage.setItem("v3ry-pocket-color-preferences", JSON.stringify({
-      version: 2, keys: [...keys], volume, fps: fpsToggle.checked,
+      version: 3, keys: [...keys], volume, fps: fpsToggle.checked, theme,
     }));
     preferencesStatus.hidden = true;
   } catch (error) { preferenceError(error); }
@@ -158,7 +171,9 @@ try {
   if (stored) {
     const data = JSON.parse(stored);
     const actions = data.version === 1 ? 8 : 10;
-    if (![1, 2].includes(data.version) || !Array.isArray(data.keys) || data.keys.length < actions
+    const storedTheme = data.version === 3 ? data.theme : "system";
+    if (![1, 2, 3].includes(data.version) || !Array.isArray(data.keys) || data.keys.length < actions
+      || !themes.includes(storedTheme)
       || data.keys.length > (data.version === 1 ? 16 : 20)
       || data.keys.some(entry => !Array.isArray(entry) || entry.length !== 2 || !validKey(entry[0])
         || !Number.isInteger(entry[1]) || entry[1] < 0 || entry[1] >= actions)
@@ -176,12 +191,20 @@ try {
     }
     volume = data.volume;
     fpsToggle.checked = data.fps;
+    theme = storedTheme;
   }
 } catch (error) { preferenceError(error); }
 volumeInput.value = String(Math.round(volume * 100));
 volumeValue.textContent = `${volumeInput.value} %`;
 keyboardSummary();
 fpsStatus.hidden = !fpsToggle.checked;
+themeSelect.value = theme;
+applyTheme();
+themeSelect.addEventListener("change", () => {
+  theme = themeSelect.value;
+  applyTheme();
+  persistPreferences();
+});
 volumeInput.addEventListener("input", () => {
   volume = Number(volumeInput.value) / 100;
   volumeValue.textContent = `${volumeInput.value} %`;

@@ -1075,3 +1075,170 @@ summary:focus-visible {
     padding-top: 34px;
   }
 }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #e3ece4;
+  background: #0e1511;
+  --green: #76bb8c;
+  --dark-green: #d4eadb;
+  --muted: #98a79d;
+}
+
+:root[data-theme="dark"] body {
+  background:
+    radial-gradient(ellipse at 83% 17%, rgb(118 187 140 / 9%), transparent 29rem),
+    #0e1511;
+}
+
+:root[data-theme="dark"] .topbar,
+:root[data-theme="dark"] .site-footer {
+  border-color: #26362d;
+}
+
+:root[data-theme="dark"] .wordmark-icon,
+:root[data-theme="dark"] .pixel-mark {
+  color: #e3ece4;
+  background: #2b5a3d;
+}
+
+:root[data-theme="dark"] .topbar-note,
+:root[data-theme="dark"] .eyebrow,
+:root[data-theme="dark"] .upload-subtitle,
+:root[data-theme="dark"] .file-types,
+:root[data-theme="dark"] .privacy-note,
+:root[data-theme="dark"] .player-footer,
+:root[data-theme="dark"] .site-footer,
+:root[data-theme="dark"] .help-card .legal-note,
+:root[data-theme="dark"] .version-badge {
+  color: #98a79d;
+}
+
+:root[data-theme="dark"] .intro-copy,
+:root[data-theme="dark"] .help-card p {
+  color: #a9b8ad;
+}
+
+:root[data-theme="dark"] .version-badge {
+  border-color: #2b3d31;
+  background: rgb(255 255 255 / 4%);
+}
+
+:root[data-theme="dark"] .drop-zone {
+  border-color: #34463a;
+  background: rgb(255 255 255 / 3%);
+}
+
+:root[data-theme="dark"] .drop-zone:hover,
+:root[data-theme="dark"] .drop-zone.is-dragging {
+  border-color: var(--green);
+  background: rgb(255 255 255 / 6%);
+}
+
+:root[data-theme="dark"] .upload-icon {
+  background: #1d3427;
+}
+
+:root[data-theme="dark"] .upload-title,
+:root[data-theme="dark"] .player-heading h2,
+:root[data-theme="dark"] .settings summary,
+:root[data-theme="dark"] .help-card h2 {
+  color: #e3ece4;
+}
+
+:root[data-theme="dark"] .status-message {
+  color: #a9c2ae;
+}
+
+:root[data-theme="dark"] .status-message.is-error {
+  color: #ffb4ab;
+}
+
+:root[data-theme="dark"] .system-pill {
+  color: #a9c2ae;
+  border-color: #2e4236;
+  background: transparent;
+}
+
+:root[data-theme="dark"] .archive-picker select,
+:root[data-theme="dark"] .settings-row input,
+:root[data-theme="dark"] .settings-row select,
+:root[data-theme="dark"] .player-actions select {
+  color: #e3ece4;
+  border-color: #34463a;
+  background: #17221b;
+}
+
+:root[data-theme="dark"] .player-actions button,
+:root[data-theme="dark"] .settings button,
+:root[data-theme="dark"] .archive-picker button,
+:root[data-theme="dark"] .touch-controls button,
+:root[data-theme="dark"] .camera-panel button,
+:root[data-theme="dark"] .printer-panel .printer-close-button {
+  color: #d4eadb;
+  border-color: #34463a;
+  background: #1d3427;
+}
+
+:root[data-theme="dark"] .player-actions button:hover:not(:disabled),
+:root[data-theme="dark"] .settings button:hover,
+:root[data-theme="dark"] .archive-picker button:hover,
+:root[data-theme="dark"] .touch-controls button:hover,
+:root[data-theme="dark"] .camera-panel button:hover,
+:root[data-theme="dark"] .printer-panel .printer-close-button:hover {
+  border-color: #4f7a5c;
+  background: #25412f;
+}
+
+:root[data-theme="dark"] .touch-controls button:active {
+  background: #34463a;
+}
+
+:root[data-theme="dark"] .camera-panel,
+:root[data-theme="dark"] .printer-panel,
+:root[data-theme="dark"] .settings,
+:root[data-theme="dark"] .help-card {
+  border-color: #26362d;
+  background: rgb(255 255 255 / 3%);
+}
+
+:root[data-theme="dark"] .camera-preview {
+  border-color: #34463a;
+  background: #0b110d;
+}
+
+:root[data-theme="dark"] .save-settings[open] {
+  background: #17221b;
+}
+
+:root[data-theme="dark"] .save-settings .save-heading {
+  border-top-color: #26362d;
+}
+
+:root[data-theme="dark"] .graphics-grid canvas {
+  background: repeating-conic-gradient(#2a382f 0% 25%, #1a241d 0% 50%) 0 0 / 12px 12px;
+}
+
+:root[data-theme="dark"] .help-icon {
+  border-color: #2e4236;
+}
+
+:root[data-theme="dark"] .restart-button {
+  color: #8fb79a;
+}
+
+:root[data-theme="dark"] .restart-button:hover:not(:disabled) {
+  color: #d4eadb;
+}
+
+:root[data-theme="dark"] .restart-button:disabled {
+  color: #5d6b61;
+}
+
+:root[data-theme="dark"] button:focus-visible,
+:root[data-theme="dark"] select:focus-visible,
+:root[data-theme="dark"] input:focus-visible,
+:root[data-theme="dark"] summary:focus-visible {
+  outline-color: rgb(118 187 140 / 40%);
+}
+

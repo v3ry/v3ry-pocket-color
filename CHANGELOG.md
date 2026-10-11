@@ -17,6 +17,7 @@ Les changements notables de chaque version sont consignés ici.
 - GBA : service BIOS `MultiBoot` (0x25) sans partenaire de liaison. Aucun esclave ne répond, donc aucun client n'est marqué et rien n'est envoyé.
 - GBA : horloge temps réel (S-3511A) des cartouches Pokémon Rubis, Saphir et Émeraude. La date et l'heure sont lues et écrites via GPIO, et l'état est conservé dans les sauvegardes d'état. Le protocole suit GBATEK ; il n'a pas encore été validé sur une vraie cartouche.
 - GBA : registres de liaison série (SIOCNT, SIODATA, SIOMULTI, RCNT) avec transfert temporisé et IRQ, en mode normal, multijoueur et UART. Le câble est considéré comme débranché : aucun partenaire ne répond, et le multijoueur signale une erreur. Le multijoueur réel n'est pas géré.
+- Interface : thème clair, sombre ou système, réglable dans « Affichage, commandes et performances ». Le choix est conservé avec les autres réglages (version 3 des préférences). Par défaut, le thème suit le système, ce qui change l'apparence des navigateurs réglés en sombre.
 
 ### Corrigé
 

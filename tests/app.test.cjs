@@ -94,6 +94,8 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   document.createElement = () => { const result = new Element(); created.push(result); return result; };
   document.hidden = false;
   document.body = new Element();
+  document.documentElement = new Element();
+  document.documentElement.dataset = {};
   let nextFrame = 0;
   const pending = new Map();
   const errors = [];
@@ -104,6 +106,8 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   window.setTimeout = callback => callback();
   window.clearTimeout = () => {};
   window.localStorage = { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) };
+  const systemTheme = { matches: false, listeners: [], addEventListener(name, listener) { this.listeners.push(listener); } };
+  window.matchMedia = () => systemTheme;
   class AudioContext {
     constructor() { this.state = "running"; this.sampleRate = 48000; this.currentTime = 0; }
     async resume() { this.state = "running"; }
@@ -152,7 +156,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     callback(time);
   };
   const evaluate = expression => vm.runInContext(expression, scope);
-  return { element, evaluate, window, document, preferences, errors, pending, scope, store, intervals, downloads, created, audioBuffers, audioStarts, cameraCalls, cameraTracks };
+  return { element, evaluate, window, document, preferences, errors, pending, scope, store, intervals, downloads, created, audioBuffers, audioStarts, cameraCalls, cameraTracks, systemTheme };
 }
 function file(name, bytes) {
   return { name, size: bytes.length, arrayBuffer: async () => bytes.slice().buffer };
@@ -324,7 +328,7 @@ test("GBA shoulders, gamepad controls and legacy keyboard preferences preserve G
   h.window.fire("keydown", { code: "KeyX", target: new Element(), preventDefault() {} });
   h.window.fire("keydown", { code: "KeyX", target: new Element(), preventDefault() {} });
   assert.equal(h.evaluate("emulator.buttons & 512"), 0);
-  const saved = JSON.parse(preferences.get("v3ry-pocket-color-preferences")); assert.equal(saved.version, 2);
+  const saved = JSON.parse(preferences.get("v3ry-pocket-color-preferences")); assert.equal(saved.version, 3); assert.equal(saved.theme, "system");
   const buttons = Array.from({ length: 16 }, () => ({ pressed: false })); buttons[5].pressed = true;
   h.scope.navigator.getGamepads = () => [{ connected: true, mapping: "standard", buttons, axes: [0, 0] }];
   h.evaluate("pollGamepads()"); assert.equal(h.evaluate("emulator.buttons & 256"), 0);
@@ -1224,6 +1228,50 @@ test("volume, FPS and physical key mappings persist and conflicts are refused", 
   fresh.element("#reset-keys").fire("click");
   assert.equal(fresh.evaluate("emulator.buttons"), 0);
   assert.equal(fresh.evaluate("keys.get('KeyQ')"), 4);
+});
+
+test("theme choice is switchable, persists, and follows the system only when set to system", () => {
+  const h = harness();
+  assert.equal(h.document.documentElement.dataset.theme, "light");
+  h.element("#theme-select").value = "dark";
+  h.element("#theme-select").fire("change");
+  assert.equal(h.document.documentElement.dataset.theme, "dark");
+  assert.equal(h.element('meta[name="theme-color"]').content, "#0e1511");
+  const fresh = harness(h.store, h.preferences);
+  assert.equal(fresh.element("#theme-select").value, "dark");
+  assert.equal(fresh.document.documentElement.dataset.theme, "dark");
+  fresh.element("#theme-select").value = "system";
+  fresh.element("#theme-select").fire("change");
+  fresh.systemTheme.matches = false;
+  fresh.systemTheme.listeners.forEach(listener => listener());
+  assert.equal(fresh.document.documentElement.dataset.theme, "light");
+  fresh.systemTheme.matches = true;
+  fresh.systemTheme.listeners.forEach(listener => listener());
+  assert.equal(fresh.document.documentElement.dataset.theme, "dark");
+  fresh.element("#theme-select").value = "light";
+  fresh.element("#theme-select").fire("change");
+  fresh.systemTheme.listeners.forEach(listener => listener());
+  assert.equal(fresh.document.documentElement.dataset.theme, "light");
+  const restored = harness(fresh.store, fresh.preferences);
+  assert.equal(restored.element("#theme-select").value, "light");
+  assert.equal(restored.document.documentElement.dataset.theme, "light");
+});
+
+test("an invalid saved theme is reported and the default system theme is used", () => {
+  const preferences = new Map([["v3ry-pocket-color-preferences", JSON.stringify({ version: 3, theme: "neon", keys: [], volume: 0.7, fps: false })]]);
+  const h = harness(memorySaveStore(), preferences);
+  assert.equal(h.element("#theme-select").value, "system");
+  assert.equal(h.document.documentElement.dataset.theme, "light");
+  assert.equal(h.element("#preferences-status").hidden, false);
+});
+
+test("the HTML offers three theme choices and applies the saved theme before the first paint", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+  assert.match(html, /<select id="theme-select"[^>]*>/);
+  for (const value of ["system", "light", "dark"]) assert.ok(html.includes(`<option value="${value}">`), value);
+  const head = html.slice(0, html.indexOf("</head>"));
+  assert.match(head, /<script>[\s\S]*dataset\.theme[\s\S]*<\/script>/);
+  assert.ok(head.indexOf("<script>") > head.indexOf('href="styles.css"'));
 });
 
 test("unavailable preference storage is reported without preventing play", async () => {

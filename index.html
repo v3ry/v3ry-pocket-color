@@ -9,6 +9,17 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <script>
+      (() => {
+        let theme = "system";
+        try {
+          const stored = JSON.parse(localStorage.getItem("v3ry-pocket-color-preferences"));
+          if (stored && stored.version >= 3) theme = stored.theme;
+        } catch (error) {}
+        if (!["light", "dark"].includes(theme)) theme = "system";
+        document.documentElement.dataset.theme = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+      })();
+    </script>
     <script src="gbc/cpu.js" defer></script>
     <script src="gbc/cartridge.js" defer></script>
     <script src="gbc/audio.js" defer></script>
@@ -170,7 +181,15 @@
           <p id="pwa-status" class="status-message" role="status" aria-live="polite">L’installation hors ligne nécessite HTTPS ou localhost.</p>
         </div>
         <details class="settings">
-          <summary>Commandes et performances</summary>
+          <summary>Affichage, commandes et performances</summary>
+          <div class="settings-row">
+            <label for="theme-select">Thème</label>
+            <select id="theme-select">
+              <option value="system">Système</option>
+              <option value="light">Clair</option>
+              <option value="dark">Sombre</option>
+            </select>
+          </div>
           <p id="gamepad-status" class="status-message" role="status">Manette : connectez une manette standard et appuyez sur un bouton.</p>
           <div class="settings-row">
             <label for="key-action">Commande à personnaliser</label>
