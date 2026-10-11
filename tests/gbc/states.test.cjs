@@ -83,6 +83,67 @@ test("MBC7 states preserve EEPROM words, mid-command EEPROM state, accelerometer
   assert.equal(restored.cartridge.readRAM(0xa020), 0xd0);
 });
 
+test("MMM01 states preserve menu registers, mapping and the selected RAM bank", async () => {
+  const rom = makeROM({ type: 0x0b, sizeCode: 7, ramSize: 3 });
+  const key = await memorySaveStore().keyFor(rom), game = new GameBoy(rom);
+  game.cartridge.control(0x0000, 0x0a); game.cartridge.control(0x4000, 0x12);
+  game.cartridge.control(0x2000, 0x21); game.cartridge.control(0x6000, 0x01);
+  game.cartridge.writeRAM(0xa000, 0x66);
+  const state = States.capture(game, key), restored = new GameBoy(rom);
+  States.restore(restored, state, key);
+  assert.equal(restored.cartridge.mmmControl, 0x00);
+  assert.equal(restored.cartridge.mmmRam, 0x12);
+  assert.equal(restored.cartridge.mmmLow, 0x21);
+  assert.equal(restored.cartridge.mmmMask, 0x01);
+  assert.equal(restored.cartridge.readRAM(0xa000), 0x66);
+});
+
+test("HuC1 and HuC3 states preserve banks, IR mode and HuC3 command memory", async () => {
+  const huc1 = makeROM({ type: 0xff, sizeCode: 7, ramSize: 3 });
+  const huc1Key = await memorySaveStore().keyFor(huc1), huc1Game = new GameBoy(huc1);
+  huc1Game.cartridge.control(0x2000, 0x45); huc1Game.cartridge.control(0x4000, 0x03);
+  huc1Game.cartridge.writeRAM(0xa000, 0x5a); huc1Game.cartridge.control(0x0000, 0x0e);
+  const huc1Restored = new GameBoy(huc1);
+  States.restore(huc1Restored, States.capture(huc1Game, huc1Key), huc1Key);
+  assert.equal(huc1Restored.cartridge.bank, 5);
+  assert.equal(huc1Restored.cartridge.irMode, 1);
+  assert.equal(huc1Restored.cartridge.readRAM(0xa000), 0xc0);
+  huc1Restored.cartridge.control(0x0000, 0x0a);
+  huc1Restored.cartridge.control(0x4000, 0x03);
+  assert.equal(huc1Restored.cartridge.readRAM(0xa000), 0x5a);
+
+  const huc3 = makeROM({ type: 0xfe, sizeCode: 7, ramSize: 3 });
+  const huc3Key = await memorySaveStore().keyFor(huc3), huc3Game = new GameBoy(huc3);
+  for (const mailbox of [0x52, 0x40, 0x39]) {
+    huc3Game.cartridge.control(0x0000, 0x0b); huc3Game.cartridge.writeRAM(0xa000, mailbox);
+    huc3Game.cartridge.control(0x0000, 0x0d); huc3Game.cartridge.writeRAM(0xa000, 0x00);
+  }
+  const huc3Restored = new GameBoy(huc3);
+  States.restore(huc3Restored, States.capture(huc3Game, huc3Key), huc3Key);
+  const cart = huc3Restored.cartridge;
+  assert.equal(cart.huc3Memory[0x20], 9);
+  assert.equal(cart.huc3Address, 0x21);
+  assert.equal(cart.huc3Mailbox, 0x39);
+  for (const mailbox of [0x40, 0x10]) {
+    cart.control(0x0000, 0x0b); cart.writeRAM(0xa000, mailbox);
+    cart.control(0x0000, 0x0d); cart.writeRAM(0xa000, 0x00);
+  }
+  cart.control(0x0000, 0x0c);
+  assert.equal(cart.readRAM(0xa000), 0x19);
+});
+
+test("states without HuC3 memory still restore an MBC1 cartridge", async () => {
+  const rom = makeROM({ type: 0x01, sizeCode: 2, ramSize: 2 });
+  const key = await memorySaveStore().keyFor(rom), game = new GameBoy(rom);
+  game.cartridge.control(0x0000, 0x0a); game.cartridge.writeRAM(0xa000, 0x42);
+  const state = States.capture(game, key);
+  delete state.cartridge.huc3Memory;
+  const restored = new GameBoy(rom);
+  States.restore(restored, state, key);
+  restored.cartridge.control(0x0000, 0x0a);
+  assert.equal(restored.cartridge.readRAM(0xa000), 0x42);
+});
+
 test("wrong ROM, version and corrupt snapshots are rejected without mutation", async () => {
   const rom = makeDemoROM(true), key = await memorySaveStore().keyFor(rom), game = new GameBoy(rom);
   game.runCycles(70224);

@@ -7,9 +7,19 @@
     [0x05, "MBC2"], [0x06, "MBC2"],
     [0x0f, "MBC3"], [0x10, "MBC3"], [0x11, "MBC3"], [0x12, "MBC3"], [0x13, "MBC3"],
     [0x19, "MBC5"], [0x1a, "MBC5"], [0x1b, "MBC5"], [0x1c, "MBC5"], [0x1d, "MBC5"], [0x1e, "MBC5"],
-    [0x22, "MBC7"], [0xfc, "Camera"],
+    [0x0b, "MMM01"], [0x0c, "MMM01"], [0x0d, "MMM01"],
+    [0x22, "MBC7"], [0xfc, "Camera"], [0xfe, "HUC3"], [0xff, "HUC1"],
   ]);
+  const MMM01_TYPES = new Set([0x0b, 0x0c, 0x0d]);
   const RAM_SIZES = [0, 2048, 8192, 32768, 131072, 65536];
+  // MMM01 keeps the header of its multi-game menu at the end of the ROM.
+  function headerBase(bytes) {
+    const base = bytes.length - 0x8000;
+    if (base <= 0 || !MMM01_TYPES.has(bytes[base + 0x147])) return 0;
+    let checksum = 0;
+    for (let i = 0x134; i <= 0x14c; i++) checksum = (checksum - bytes[base + i] - 1) & 255;
+    return checksum === bytes[base + 0x14d] ? base : 0;
+  }
   const CAMERA_WIDTH = 128, CAMERA_SENSOR_HEIGHT = 120, CAMERA_HEIGHT = 112;
   const CAMERA_IMAGE_OFFSET = 0x100;
 
@@ -18,26 +28,27 @@
       if (!(bytes instanceof Uint8Array) || bytes.length < 0x8000) {
         throw new Error("ROM tronquee : au moins 32 Kio sont necessaires.");
       }
-      const sizeCode = bytes[0x148];
+      const header = bytes.subarray(headerBase(bytes));
+      const sizeCode = header[0x148];
       const banks = sizeCode <= 8 ? 2 << sizeCode : { 0x52: 72, 0x53: 80, 0x54: 96 }[sizeCode];
       if (!banks || bytes.length !== banks * 0x4000) {
         throw new Error("La taille de la ROM ne correspond pas a son en-tete.");
       }
       let checksum = 0;
-      for (let i = 0x134; i <= 0x14c; i++) checksum = (checksum - bytes[i] - 1) & 255;
-      if (checksum !== bytes[0x14d]) throw new Error("En-tete de ROM invalide (checksum).");
-      this.type = bytes[0x147];
+      for (let i = 0x134; i <= 0x14c; i++) checksum = (checksum - header[i] - 1) & 255;
+      if (checksum !== header[0x14d]) throw new Error("En-tete de ROM invalide (checksum).");
+      this.type = header[0x147];
       this.mapper = TYPES.get(this.type);
       if (!this.mapper) throw new Error(`Cartouche non prise en charge : type 0x${this.type.toString(16)}.`);
-      if (RAM_SIZES[bytes[0x149]] === undefined) throw new Error("Taille de RAM inconnue.");
+      if (RAM_SIZES[header[0x149]] === undefined) throw new Error("Taille de RAM inconnue.");
       this.isCamera = this.mapper === "Camera";
       this.rom = bytes;
       this.banks = banks;
-      this.color = !!(bytes[0x143] & 0x80);
+      this.color = !!(header[0x143] & 0x80);
       const titleEnd = this.color ? 0x13f : 0x144;
-      this.title = String.fromCharCode(...bytes.subarray(0x134, titleEnd)).replace(/\0.*$/, "").trim();
-      this.ram = new Uint8Array(this.mapper === "MBC2" ? 512 : this.mapper === "MBC7" ? 256 : RAM_SIZES[bytes[0x149]]);
-      this.ramEnabled = this.mapper === "ROM";
+      this.title = String.fromCharCode(...header.subarray(0x134, titleEnd)).replace(/\0.*$/, "").trim();
+      this.ram = new Uint8Array(this.mapper === "MBC2" ? 512 : this.mapper === "MBC7" ? 256 : RAM_SIZES[header[0x149]]);
+      this.ramEnabled = this.mapper === "ROM" || this.mapper === "HUC1";
       this.bank = 1;
       this.highBank = 0;
       this.ramBank = 0;
@@ -63,16 +74,76 @@
         this.eepromShift = 0;
         this.eepromWriteEnabled = false;
       }
+      if (this.mapper === "MMM01") {
+        this.mmmControl = 0;
+        this.mmmLow = 0;
+        this.mmmRam = 0;
+        this.mmmMask = 0;
+      }
+      if (this.mapper === "HUC1") this.irMode = 0;
+      if (this.mapper === "HUC3") {
+        this.huc3Mode = 0;
+        this.huc3Address = 0;
+        this.huc3Mailbox = 0;
+        this.huc3Result = 0;
+      }
+      this.huc3Memory = new Uint8Array(this.mapper === "HUC3" ? 256 : 0);
     }
     readROM(address) {
+      if (this.mapper === "MMM01") return this.readMMM01(address);
       let bank = 0;
       if (address < 0x4000) {
         if (this.mapper === "MBC1" && this.mode) bank = this.highBank << 5;
       } else bank = this.mapper === "MBC1" ? (this.highBank << 5) | this.bank : this.bank;
       return this.rom[(bank % this.banks) * 0x4000 + (address & 0x3fff)];
     }
+    readMMM01(address) {
+      if (!(this.mmmControl & 0x40)) {
+        return this.rom[(address < 0x4000 ? this.banks - 2 : this.banks - 1) * 0x4000 + (address & 0x3fff)];
+      }
+      const romMask = (this.mmmMask >> 1) & 0x1f, low = this.mmmLow & 0x1f;
+      const base = (((this.mmmRam >> 4) & 3) << 7) | (((this.mmmLow >> 5) & 3) << 5);
+      let bank = address < 0x4000 ? base | (low & romMask) : base | low;
+      if (address >= 0x4000 && !(low & ~romMask & 0x1f)) bank |= 1;
+      return this.rom[(bank % this.banks) * 0x4000 + (address & 0x3fff)];
+    }
+    controlMMM01(address, value) {
+      const mapped = (this.mmmControl & 0x40) !== 0;
+      const romMask = (this.mmmMask >> 1) & 0x1f;
+      const ramMask = (this.mmmControl >> 4) & 3;
+      if (address < 0x2000) {
+        this.ramEnabled = (value & 15) === 10;
+        if (!mapped) this.mmmControl = value & 0x70;
+      } else if (address < 0x4000) {
+        const writable = (0x1f & ~romMask) | (mapped ? 0 : 0x60);
+        this.mmmLow = (this.mmmLow & ~writable) | (value & writable);
+      } else if (address < 0x6000) {
+        const writable = (3 & ~ramMask) | (mapped ? 0 : 0x7c);
+        this.mmmRam = (this.mmmRam & ~writable) | (value & writable);
+      } else {
+        const writable = ((this.mmmRam & 0x40) ? 0 : 1) | (mapped ? 0 : 0x3e);
+        this.mmmMask = (this.mmmMask & ~writable) | (value & writable);
+      }
+    }
+    mmm01RamBank() {
+      const high = (this.mmmRam >> 2) & 3, low = this.mmmRam & 3;
+      return (high << 2) | (this.mmmMask & 1 ? low : low & ((this.mmmControl >> 4) & 3));
+    }
     control(address, value) {
       if (this.mapper === "ROM") return;
+      if (this.mapper === "MMM01") { this.controlMMM01(address, value); return; }
+      if (this.mapper === "HUC1") {
+        if (address < 0x2000) this.irMode = value === 0x0e ? 1 : 0;
+        else if (address < 0x4000) this.bank = value & 0x3f;
+        else if (address < 0x6000) this.ramBank = value & 3;
+        return;
+      }
+      if (this.mapper === "HUC3") {
+        if (address < 0x2000) this.huc3Mode = value & 15;
+        else if (address < 0x4000) this.bank = value & 0x7f;
+        else if (address < 0x6000) this.ramBank = value & 3;
+        return;
+      }
       if (this.mapper === "MBC7") {
         if (address < 0x2000) this.ramEnabled = value === 0x0a;
         else if (address < 0x4000) this.bank = value & 127;
@@ -187,9 +258,51 @@
       this.rtc[4] = (this.rtc[4] & 0xc0) | ((days >> 8) & 1) | (days > 511 ? 0x80 : 0);
       this.saveRevision++;
     }
+    readHuC3(address) {
+      switch (this.huc3Mode) {
+        case 0x0: case 0xa: return this.ram.length ? this.ram[this.ramOffset(address)] : 255;
+        case 0xc: return (this.huc3Mailbox & 0x70) | this.huc3Result;
+        case 0xe: return 0xc0;
+        default: return 255;
+      }
+    }
+    writeHuC3(address, value) {
+      switch (this.huc3Mode) {
+        case 0xa:
+          if (this.ram.length) {
+            const offset = this.ramOffset(address);
+            if (this.ram[offset] !== value) {
+              this.ram[offset] = value;
+              this.saveRevision++;
+            }
+          }
+          break;
+        case 0xb: this.huc3Mailbox = value; break;
+        case 0xd: if (!(value & 1)) this.huc3Execute(); break;
+      }
+    }
+    huc3Execute() {
+      const command = (this.huc3Mailbox >> 4) & 7, argument = this.huc3Mailbox & 15;
+      const address = this.huc3Address, memory = this.huc3Memory;
+      switch (command) {
+        case 1:
+          this.huc3Result = memory[address] & 15;
+          this.huc3Address = (address + 1) & 255;
+          break;
+        case 3:
+          memory[address] = argument;
+          this.huc3Address = (address + 1) & 255;
+          this.saveRevision++;
+          break;
+        case 4: this.huc3Address = (address & 0xf0) | argument; break;
+        case 5: this.huc3Address = (address & 0x0f) | (argument << 4); break;
+        case 6: if (argument === 2) this.huc3Result = 1; break;
+      }
+    }
     ramOffset(address) {
       if (this.mapper === "MBC2") return address & 511;
-      const bank = this.mapper === "MBC1" ? this.mode ? this.highBank : 0 : this.ramBank;
+      const bank = this.mapper === "MBC1" ? this.mode ? this.highBank : 0
+        : this.mapper === "MMM01" ? this.mmm01RamBank() : this.ramBank;
       return (bank * 8192 + (address & 8191)) % this.ram.length;
     }
     readRAM(address) {
@@ -199,6 +312,8 @@
         if (this.cameraBusyCycles) return 0;
         return this.ram.length ? this.ram[this.ramOffset(address)] : 255;
       }
+      if (this.mapper === "HUC1" && this.irMode) return 0xc0;
+      if (this.mapper === "HUC3") return this.readHuC3(address);
       if (!this.ramEnabled) return 255;
       if (this.mapper === "MBC3" && this.ramBank >= 8 && this.ramBank <= 12) {
         if (!this.hasRTC) return 255;
@@ -222,6 +337,8 @@
         }
         return;
       }
+      if (this.mapper === "HUC1" && this.irMode) return;
+      if (this.mapper === "HUC3") { this.writeHuC3(address, value); return; }
       if (!this.ramEnabled) return;
       if (this.mapper === "MBC3" && this.ramBank >= 8 && this.ramBank <= 12) {
         if (this.hasRTC) {
@@ -348,11 +465,14 @@
         version: 1, type: this.type, ram: this.exportRAM(),
         rtc: this.hasRTC ? this.rtc.slice() : null,
         lastRTC: this.hasRTC ? this.lastRTC : null,
+        huc3: this.mapper === "HUC3" ? this.huc3Memory.slice() : null,
       };
     }
     restoreData(data) {
       if (!data || data.version !== 1 || data.type !== this.type
         || !(data.ram instanceof Uint8Array) || data.ram.length !== this.ram.length
+        || (this.mapper === "HUC3" ? !(data.huc3 instanceof Uint8Array) || data.huc3.length !== 256
+          : (data.huc3 ?? null) !== null)
         || (this.hasRTC ? !(data.rtc instanceof Uint8Array) || data.rtc.length !== 5
           || !Number.isSafeInteger(data.lastRTC) || data.lastRTC < 0
           || data.rtc[0] > 63 || data.rtc[1] > 63 || data.rtc[2] > 31
@@ -369,6 +489,7 @@
         this.rtcLatched = false;
         this.updateRTC();
       }
+      if (this.mapper === "HUC3") this.huc3Memory.set(data.huc3);
       this.saveRevision++;
     }
   }

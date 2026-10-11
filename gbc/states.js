@@ -5,7 +5,7 @@
   const MAX_SIZE = 4 * 1024 * 1024;
   const CAMERA_MAX_BUSY_CYCLES = 4 * (32446 + 512 + 16 * 65535);
   const MEMORY = ["vram", "wram", "oam", "io", "hram", "bgPalette", "objPalette", "pixels"];
-  const CART_ARRAYS = ["ram", "rtc", "latchedRTC"];
+  const CART_ARRAYS = ["ram", "rtc", "latchedRTC", "huc3Memory"];
   const CART_EXCLUDE = new Set(["rom", "banks", "color", "title", "mapper", "type", "hasRTC", "saveRevision",
     "isCamera", "cameraRegisters", "cameraCaptureProvider", "cameraBusyCycles", ...CART_ARRAYS]);
   const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "apu", "color", "serialDevice", ...MEMORY]);
@@ -36,6 +36,10 @@
     if (!Array.isArray(data) || data.length !== length) throw new Error("Taille de memoire d'etat invalide.");
     for (const byte of data) integer(byte, 0, 255);
     return data;
+  }
+  // Saves made before a cartridge array existed omit it; such cartridges have an empty array.
+  function cartArray(cartridge, key) {
+    return cartridge[key] ?? [];
   }
   function capture(game, romKey) {
     if (!/^[0-9a-f]{64}$/.test(romKey)) throw new Error("Identite ROM invalide.");
@@ -101,6 +105,16 @@
       integer(cart.eepromCount, 0, 26);
       integer(cart.eepromShift, 0, 0x3ffffff);
     }
+    if (game.cartridge.mapper === "MMM01") {
+      for (const key of ["mmmControl", "mmmLow", "mmmRam", "mmmMask"]) integer(cart[key], 0, 127);
+    }
+    if (game.cartridge.mapper === "HUC1") integer(cart.irMode, 0, 1);
+    if (game.cartridge.mapper === "HUC3") {
+      integer(cart.huc3Mode, 0, 15);
+      integer(cart.huc3Address, 0, 255);
+      integer(cart.huc3Mailbox, 0, 255);
+      integer(cart.huc3Result, 0, 15);
+    }
     let cameraRegisters = null, cameraBusyCycles = 0;
     if (data.version === 3) {
       if (game.cartridge.isCamera) {
@@ -114,7 +128,10 @@
       } else if (data.cartridge.camera !== null) throw new Error("État caméra incompatible avec cette cartouche.");
     }
     integer(cart.lastRTC, 0, Number.MAX_SAFE_INTEGER);
-    for (const key of CART_ARRAYS) byteArray(data.cartridge[key], game.cartridge[key].length);
+    for (const key of CART_ARRAYS) byteArray(cartArray(data.cartridge, key), game.cartridge[key].length);
+    if (game.cartridge.mapper === "HUC3" && data.cartridge.huc3Memory.some(value => value > 15)) {
+      throw new Error("Memoire HuC3 invalide.");
+    }
     for (const key of ["rtc", "latchedRTC"]) {
       const rtc = data.cartridge[key];
       if (rtc[0] > 63 || rtc[1] > 63 || rtc[2] > 31 || (rtc[4] & ~0xc1)) throw new Error("Horloge d'etat invalide.");
@@ -142,7 +159,7 @@
     Object.assign(game, machine);
     for (const key of MEMORY) game[key].set(data.memory[key]);
     Object.assign(game.cartridge, cart);
-    for (const key of CART_ARRAYS) game.cartridge[key].set(data.cartridge[key]);
+    for (const key of CART_ARRAYS) game.cartridge[key].set(cartArray(data.cartridge, key));
     if (game.cartridge.isCamera && cameraRegisters) {
       game.cartridge.cameraRegisters.set(cameraRegisters);
       game.cartridge.cameraBusyCycles = cameraBusyCycles;
