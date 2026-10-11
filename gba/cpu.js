@@ -5,6 +5,16 @@
   const rotate = (value, amount) => (value >>> (amount & 31) | value << ((32 - amount) & 31)) >>> 0;
   const signed = (value, bits) => value << (32 - bits) >> (32 - bits);
 
+  // Stop raised for behaviour the core does not emulate; `report` locates it precisely.
+  class UnsupportedError extends Error {
+    constructor(kind, message, report) {
+      super(message);
+      this.name = "GBAUnsupportedError";
+      this.kind = kind;
+      this.report = report;
+    }
+  }
+
   class CPU {
     constructor(bus) {
       this.bus = bus;
@@ -30,7 +40,7 @@
     status(value) {
       const oldMode = this.cpsr & 31, nextMode = value & 31;
       if (![0x10, 0x11, 0x12, 0x13, 0x17, 0x1b, 0x1f].includes(nextMode)) {
-        throw new Error(`Mode ARM invalide : 0x${nextMode.toString(16)}.`);
+        throw this.fail("state", `Mode ARM invalide : 0x${nextMode.toString(16)}.`);
       }
       const bank = mode => mode === 0x1f ? 0x10 : mode;
       if (bank(oldMode) !== bank(nextMode)) {
@@ -45,13 +55,25 @@
       this.cpsr = value >>> 0;
     }
     restoreStatus() {
-      const saved = this.saved.get(this.cpsr & 31);
-      if (saved === undefined) throw new Error("Retour d'exception ARM sans SPSR.");
+      const mode = this.cpsr & 31, saved = this.saved.get(mode);
+      // User and System modes have no SPSR: the S bit leaves CPSR unchanged.
+      if (mode === 0x10 || mode === 0x1f) return;
+      if (saved === undefined) {
+        throw this.fail("state", `Retour d'exception ARM sans SPSR a 0x${this.address.toString(16)}.`);
+      }
       this.status(saved);
+    }
+    snapshot() {
+      return { pc: this.address, thumb: this.thumb, cpsr: this.cpsr, registers: Array.from(this.r), frame: this.bus.frames };
+    }
+    fail(kind, message, extra = {}) {
+      const report = { kind, ...this.snapshot(), ...extra };
+      this.bus.lastStop = report;
+      return new UnsupportedError(kind, message, report);
     }
     irq() {
       const handler = this.bus.read32(0x03007ffc);
-      if (!handler) throw new Error("Interruption GBA sans gestionnaire BIOS installe.");
+      if (!handler) throw this.fail("interrupt", "Interruption GBA sans gestionnaire BIOS installe.");
       const returnAddress = this.r[15];
       this.irqFrames.push({
         returnAddress, cpsr: this.cpsr, registers: this.r.slice(0, 4), r12: this.r[12],
@@ -151,7 +173,11 @@
         if (frame.waiting && this.bus.waitMask) this.bus.halted = true;
         return 6;
       }
-      if (this.address < 0x4000) throw new Error(`Execution BIOS GBA non prise en charge : 0x${this.address.toString(16)}.`);
+      if (this.address < 0x4000) {
+        // The reset vector restarts the console; any other BIOS address is not emulated.
+        if (this.address === 0) { this.bus.reset(this.r[14]); return 1; }
+        throw this.fail("bios", `Execution BIOS GBA non prise en charge : 0x${this.address.toString(16)}.`);
+      }
       const instruction = this.bus.read32(this.address);
       this.bus.openBus = instruction;
       if (this.thumb) {
@@ -174,7 +200,7 @@
       if ((op & 0x0fbf0fff) === 0x010f0000) {
         this.r[rd] = op & 0x400000 ? this.saved.get(this.cpsr & 31) ?? this.cpsr : this.cpsr; return 1;
       }
-      if ((op & 0x0db0f000) === 0x0120f000) {
+      if ((op & 0x0db0f000) === 0x0120f000 && (op & 0x02000000 || !(op & 0xff0))) {
         const value = op & 0x02000000 ? this.operand(op) : this.reg(op & 15);
         let mask = 0;
         for (let i = 0; i < 4; i++) if (op & (1 << (16 + i))) mask |= 255 << (i * 8);
@@ -424,9 +450,13 @@
       }
       return this.unsupported(op);
     }
-    unsupported(op) { throw new Error(`Instruction GBA non prise en charge : 0x${op.toString(16)} a 0x${this.address.toString(16)}.`); }
+    unsupported(op) {
+      throw this.fail("instruction", `Instruction GBA non prise en charge : 0x${op.toString(16)} a 0x${this.address.toString(16)}.`,
+        { opcode: op >>> 0 });
+    }
   }
-  const api = { CPU };
+  CPU.UnsupportedError = UnsupportedError;
+  const api = { CPU, UnsupportedError };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.PocketGBACPU = CPU;
 })(globalThis);

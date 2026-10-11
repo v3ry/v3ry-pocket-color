@@ -143,5 +143,80 @@ test("Thumb conditional branches and paired BL compute signed destinations", () 
 test("unknown ARM/Thumb instructions and BIOS calls fail explicitly", () => {
   assert.throws(() => cpu([0xee000000]).step(), /Instruction GBA/);
   assert.throws(() => cpu([0xde00], true).step(), /Instruction GBA/);
-  assert.throws(() => cpu([0xef190000]).step(), /Service BIOS/);
+  assert.throws(() => cpu([0xef1a0000]).step(), /Service BIOS/);
+});
+
+test("unsupported stops carry a structured report locating the failure", () => {
+  const arm = cpu([0xee000000]);
+  assert.throws(() => arm.step(), error => {
+    assert.equal(error.kind, "instruction"); assert.equal(error.name, "GBAUnsupportedError");
+    assert.equal(error.report.pc, 0x080000c0); assert.equal(error.report.opcode, 0xee000000);
+    assert.equal(error.report.thumb, false); assert.equal(error.report.registers.length, 16);
+    assert.equal(arm.bus.lastStop, error.report);
+    return true;
+  });
+  const thumb = cpu([0xde00], true);
+  assert.throws(() => thumb.step(), error => error.report.thumb === true && error.report.opcode === 0xde00);
+  const swi = cpu([0xef1a0000]);
+  assert.throws(() => swi.step(), error => error.kind === "swi" && error.report.swi === 0x1a && error.report.pc === 0x080000c0);
+});
+
+function resetRegisters(c, thumb) {
+  for (let i = 0; i < 13; i++) c.r[i] = 0x02000100 + i * 4;
+  c.r[13] = 0x03007000; c.r[14] = 0x08000101; c.address = 0x080000c0; c.r[15] = 0x080000c4;
+  c.cpsr = thumb ? 0x3f : 0x1f;
+}
+
+test("every Thumb encoding runs except those undefined on the ARM7TDMI", () => {
+  const c = cpu([]);
+  const undefinedOnARMv4T = op => (op & 0xff80) === 0x4780 || (op & 0xf800) === 0xe800 || op >>> 8 === 0xde
+    || [0xb1, 0xb2, 0xb3, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xbb, 0xbe, 0xbf].includes(op >>> 8);
+  for (let op = 0; op < 65536; op++) {
+    resetRegisters(c, true);
+    let rejected = false;
+    try { c.executeThumb(op); } catch (error) { rejected = error.kind === "instruction"; }
+    if (rejected !== undefinedOnARMv4T(op)) assert.fail(`Thumb 0x${op.toString(16)} should ${rejected ? "run" : "be rejected"}`);
+  }
+});
+
+// Classifies ARMv4T encodings whose decoding does not depend on should-be-zero/one fields.
+function armEncoding(op) {
+  const group = op >>> 25 & 7, b7 = op >>> 7 & 1, b4 = op >>> 4 & 1, load = op >>> 20 & 1;
+  const compareWithoutS = (op >>> 23 & 3) === 2 && !load;
+  if (group === 0 && b7 && b4) {
+    const halfword = op >>> 5 & 3;
+    if (halfword === 0) {
+      if ((op >>> 22 & 63) === 0 || (op >>> 23 & 31) === 1) return "defined";
+      return (op >>> 23 & 31) === 2 && (op >>> 20 & 3) === 0 ? "unspecified" : "undefined";
+    }
+    return !load && halfword !== 1 ? "undefined" : "defined";
+  }
+  if (group <= 1) return compareWithoutS ? "unspecified" : "defined";
+  if (group === 2 || group === 4 || group === 5) return "defined";
+  if (group === 3) return b4 ? "undefined" : "defined";
+  return (op >>> 24 & 15) === 15 ? "unspecified" : "undefined";
+}
+
+test("every ARM decode group runs except coprocessor, ARMv5 and reserved encodings", () => {
+  const c = cpu([]);
+  let seed = 12345;
+  for (let high = 0; high < 256; high++) for (let low = 0; low < 16; low++) for (let variant = 0; variant < 4; variant++) {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    const op = (0xe0000000 | high << 20 | low << 4 | seed & 0x000fff0f) >>> 0;
+    const expected = armEncoding(op);
+    if (expected === "unspecified") continue;
+    resetRegisters(c, false);
+    let rejected = false;
+    try { c.executeARM(op); } catch (error) { rejected = error.kind === "instruction"; }
+    if (rejected !== (expected === "undefined")) assert.fail(`ARM 0x${op.toString(16)} should be ${expected}`);
+  }
+});
+
+test("S-bit PC writes keep CPSR in User/System mode but need a saved SPSR in other modes", () => {
+  const system = cpu([0xe1b0f00e]);
+  system.r[14] = 0x08000200; system.step();
+  assert.equal(system.r[15], 0x08000200); assert.equal(system.cpsr, 0x1f);
+  const supervisor = cpu([0xe1b0f00e]);
+  supervisor.status(0x13); supervisor.r[14] = 0x08000200;
+  assert.throws(() => supervisor.step(), error => error.kind === "state" && /SPSR/.test(error.message));
 });

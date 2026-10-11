@@ -190,7 +190,7 @@ test("HLE division, CpuSet/FastSet, waits and unsupported services", () => {
   g.write16(0x04000200, 1);
   r[0] = 1; r[1] = 1; g.swi(4); assert.equal(g.halted, true);
   g.interrupt(1); assert.equal(g.halted, false);
-  assert.throws(() => g.swi(0x19), /Service BIOS/);
+  assert.throws(() => g.swi(0x1a), /Service BIOS/);
 });
 
 test("BIOS ArcTan and ArcTan2 use signed 1.14 inputs and return wrapped GBA angles", () => {
@@ -331,4 +331,90 @@ test("synthetic ARM GBA ROM boots, fills a mode-3 frame and advances at GBA cloc
   assert.ok(elapsed >= 1232 * 228 * 2); assert.equal(g.frames, 2);
   assert.deepEqual([...g.pixels.slice(0, 4)], [255, 0, 0, 255]);
   assert.deepEqual([...g.pixels.slice(-4)], [255, 0, 0, 255]);
+});
+
+test("BIOS checksum, SoundBias, MidiKey2Freq and CustomHalt follow the documented behaviour", () => {
+  const g = game(), r = g.cpu.r;
+  g.swi(0x0d); assert.equal(r[0], 0xbaae187f);
+  g.setIO16(0x88, 0xc200); r[0] = 0; g.swi(0x19); assert.equal(g.io16(0x88), 0xc000);
+  r[0] = 7; g.swi(0x19); assert.equal(g.io16(0x88), 0xc200);
+  const wave = 0x02000000;
+  g.write32(wave + 4, 1000 * 2 ** 10);
+  for (const [key, fine, expected] of [[60, 0, 1000], [72, 0, 2000], [60, 128, 1029]]) {
+    r[0] = wave; r[1] = key; r[2] = fine; g.swi(0x1f); assert.equal(r[0], expected);
+  }
+  r[2] = 0; g.swi(0x27); assert.equal(g.halted, true); assert.equal(g.stopped, false);
+  g.halted = false; r[2] = 0x80; g.swi(0x27); assert.equal(g.stopped, true);
+});
+
+test("a jump to the reset vector restarts the console while other BIOS addresses stop", () => {
+  const g = new GameBoyAdvance(makeGBA({ program: [0xe3a0f000] }));
+  g.ewram[0] = 7; g.iwram[0x100] = 9; g.iwram[0x7f00] = 5; g.write16(0x04000200, 1);
+  g.runCycles(100);
+  assert.ok(g.resets.length > 0); assert.equal(g.resets[0].frame, 0);
+  assert.equal(g.ewram[0], 0); assert.equal(g.iwram[0x100], 0); assert.equal(g.iwram[0x7f00], 0);
+  assert.equal(g.io16(0x200), 0);
+  const stop = new GameBoyAdvance(makeGBA());
+  stop.cpu.r[15] = 4;
+  assert.throws(() => stop.cpu.step(), error => error.kind === "bios" && error.report.pc === 4);
+  assert.equal(stop.resets.length, 0);
+});
+
+test("HardReset reboots from the cartridge entry point", () => {
+  const g = game();
+  g.ewram[0] = 7; g.cpu.r[14] = 0x08000123; g.cpu.cpsr |= 0x80;
+  g.swi(0x26);
+  assert.equal(g.cpu.r[15], 0x08000000); assert.equal(g.cpu.cpsr, 0x1f); assert.equal(g.ewram[0], 0);
+  assert.deepEqual(g.resets, [{ frame: 0, caller: 0x08000123 }]);
+});
+
+test("an unsupported BIOS service records where it was requested", () => {
+  const g = game();
+  g.cpu.address = 0x08000010;
+  assert.throws(() => g.swi(0x1a), error => {
+    assert.equal(error.kind, "swi"); assert.equal(error.report.swi, 0x1a);
+    assert.equal(error.report.pc, 0x08000010); assert.equal(g.lastStop, error.report);
+    return /a 0x8000010/.test(error.message);
+  });
+});
+
+test("DMA treats the reserved source control as increment instead of stopping", () => {
+  const g = game();
+  g.write32(0x02000000, 0x11111111); g.write32(0x02000004, 0x22222222);
+  g.write32(0x040000b0, 0x02000000); g.write32(0x040000b4, 0x03000000);
+  g.write16(0x040000b8, 2); g.write16(0x040000ba, 0x8000 | 1 << 10 | 3 << 7);
+  assert.equal(g.read32(0x03000000), 0x11111111); assert.equal(g.read32(0x03000004), 0x22222222);
+});
+
+test("DMA0 special timing is prohibited: it neither stops the core nor transfers", () => {
+  const g = game();
+  g.write32(0x02000000, 0x12345678);
+  g.write32(0x040000b0, 0x02000000); g.write32(0x040000b4, 0x03000000);
+  g.write16(0x040000b8, 1); g.write16(0x040000ba, 0x8000 | 1 << 10 | 3 << 12);
+  g.tick(1232 * 228);
+  assert.equal(g.read32(0x03000000), 0); assert.ok(g.io16(0xba) & 0x8000);
+});
+
+test("DMA3 video capture copies one unit per scanline from line 2 and stops at line 162", () => {
+  const g = game();
+  for (let i = 0; i < 170; i++) g.write16(0x02000000 + i * 2, 0x100 + i);
+  g.write32(0x040000d4, 0x02000000); g.write32(0x040000d8, 0x06000000);
+  g.write16(0x040000dc, 1); g.write16(0x040000de, 0x8000 | 1 << 9 | 3 << 12);
+  g.tick(1232 * 2 + 959); assert.equal(g.read16(0x06000000), 0);
+  g.tick(1); assert.equal(g.read16(0x06000000), 0x100); assert.equal(g.read16(0x06000002), 0);
+  g.tick(1232); assert.equal(g.read16(0x06000002), 0x101);
+  g.tick(1232 * 170);
+  assert.equal(g.read16(0x06000000 + 159 * 2), 0x100 + 159);
+  assert.equal(g.read16(0x06000000 + 160 * 2), 0);
+  assert.equal(g.io16(0xde) & 0x8000, 0);
+});
+
+test("DMA3 special timing without repeat captures a single scanline", () => {
+  const g = game();
+  g.write16(0x02000000, 0xabcd); g.write16(0x02000002, 0xdcba);
+  g.write32(0x040000d4, 0x02000000); g.write32(0x040000d8, 0x06000000);
+  g.write16(0x040000dc, 1); g.write16(0x040000de, 0x8000 | 3 << 12);
+  g.tick(1232 * 5);
+  assert.equal(g.read16(0x06000000), 0xabcd); assert.equal(g.read16(0x06000002), 0);
+  assert.equal(g.io16(0xde) & 0x8000, 0);
 });

@@ -29,6 +29,8 @@
       this.dma = Array.from({ length: 4 }, () => ({ source: 0, destination: 0, initialDestination: 0, count: 0 }));
       this.timers = Array.from({ length: 4 }, () => ({ counter: 0, reload: 0, phase: 0 }));
       this.dmaStall = 0; this.dmaBusy = false;
+      this.lastStop = null;
+      this.resets = [];
       this.setIO16(0, 128); this.setIO16(0x130, 0x3ff);
       this.setIO16(4, 4);
       for (const offset of [0x20, 0x26, 0x30, 0x36]) this.setIO16(offset, 256);
@@ -176,7 +178,6 @@
           if (!dma.count) dma.count = i === 3 ? 65536 : 16384;
           const timing = value >>> 4 & 3;
           if (timing === 0) this.transfer(i);
-          if (timing === 3 && ![1, 2].includes(i)) throw new Error("DMA special GBA hors audio non pris en charge.");
         }
       }
       if (offset === 0x132 || offset === 0x133) this.checkKeys();
@@ -184,14 +185,19 @@
     transfer(index) {
       const base = 0xb0 + index * 12, control = this.io16(base + 10), dma = this.dma[index];
       if (!(control & 0x8000) || this.dmaBusy) return;
-      const sound = (control >>> 12 & 3) === 3;
-      if (sound && ![0x040000a0, 0x040000a4].includes(dma.destination)) throw new Error("DMA audio GBA avec destination invalide.");
+      // Special timing is the sound FIFO on DMA1/DMA2 only; DMA3 capture runs once per scanline.
+      const sound = (control >>> 12 & 3) === 3 && (index === 1 || index === 2);
+      if (sound && ![0x040000a0, 0x040000a4].includes(dma.destination)) {
+        throw this.cpu.fail("dma", "DMA audio GBA avec destination invalide.", { channel: index, destination: dma.destination });
+      }
       const size = sound || control & 1024 ? 4 : 2, count = sound ? 4 : dma.count;
+      // Source control 3 is reserved; the hardware increments the address.
       const srcMode = control >>> 7 & 3, dstMode = sound ? 2 : control >>> 5 & 3;
-      if (srcMode === 3) throw new Error("Mode source DMA GBA reserve.");
       const eepromRead = this.cartridge.isEEPROM(dma.source), eepromWrite = this.cartridge.isEEPROM(dma.destination);
       if (eepromRead || eepromWrite) {
-        if (index !== 3 || size !== 2 || eepromRead && eepromWrite) throw new Error("EEPROM GBA : transfert DMA3 16 bits requis.");
+        if (index !== 3 || size !== 2 || eepromRead && eepromWrite) {
+          throw this.cpu.fail("dma", "EEPROM GBA : transfert DMA3 16 bits requis.", { channel: index, source: dma.source, destination: dma.destination });
+        }
         this.cartridge.beginEEPROMTransfer(count, eepromRead);
       }
       this.dmaBusy = true;
@@ -199,7 +205,7 @@
         for (let i = 0; i < count; i++) {
           const src = dma.source & ~(size - 1), dst = dma.destination & ~(size - 1);
           if (size === 4) this.write32(dst, this.read32(src)); else this.write16(dst, this.read16(src));
-          dma.source = (dma.source + [size, -size, 0][srcMode]) >>> 0;
+          dma.source = (dma.source + [size, -size, 0, size][srcMode]) >>> 0;
           dma.destination = (dma.destination + [size, -size, 0, size][dstMode]) >>> 0;
         }
         if (eepromRead || eepromWrite) this.cartridge.finishEEPROMTransfer();
@@ -214,6 +220,12 @@
     }
     triggerDMA(timing) {
       for (let i = 0; i < 4; i++) if ((this.io16(0xba + i * 12) >>> 12 & 3) === timing) this.transfer(i);
+    }
+    captureDMA(line) {
+      const control = this.io16(0xde);
+      if ((control >>> 12 & 3) !== 3) return;
+      if (line >= 162) this.setIO16(0xde, control & ~0x8000);
+      else if (line >= 2) this.transfer(3);
     }
     interrupt(mask) {
       this.setIO16(0x202, this.io16(0x202) | mask);
@@ -256,9 +268,11 @@
           this.io[4] |= 2;
           if (this.io[4] & 16) this.interrupt(2);
           if (this.line < 160) this.triggerDMA(2);
+          if (this.line >= 2 && this.line < 162) this.captureDMA(this.line);
         } else if (this.dot === 1232) {
           this.dot = 0; this.line = (this.line + 1) % 228;
           this.io[4] &= ~2; this.setIO16(6, this.line);
+          if (this.line === 162) this.captureDMA(162);
           if (this.line === 160) {
             this.frames++; this.framePixels.set(this.pixels); this.io[4] |= 1;
             if (this.io[4] & 8) this.interrupt(1);
@@ -300,41 +314,49 @@
       this.setIO16(0x130, this.buttons); this.checkKeys();
     }
     releaseButtons() { this.buttons = 1023; this.setIO16(0x130, this.buttons); }
+    // Console restart (jump to the reset vector, SWI 0x26): the BIOS start-up clears memory and registers, then boots the ROM.
+    reset(caller = 0) {
+      if (this.resets.length < 16) this.resets.push({ frame: this.frames, caller: caller >>> 0 });
+      this.registerRamReset(255);
+      this.iwram.fill(0, 0x7e00);
+      this.halted = false; this.stopped = false; this.waitMask = 0;
+      this.cpu = new CPU(this); this.cpu.branch(0x08000000);
+    }
+    registerRamReset(flags) {
+      if (flags & 1) this.ewram.fill(0);
+      if (flags & 2) this.iwram.fill(0, 0, 0x7e00);
+      if (flags & 4) this.palette.fill(0);
+      if (flags & 8) this.vram.fill(0);
+      if (flags & 16) this.oam.fill(0);
+      if (flags & 32) { this.io.fill(0, 0x120, 0x130); this.io.fill(0, 0x134, 0x15a); }
+      if (flags & 64) {
+        this.io.fill(0, 0x60, 0xa8);
+        this.apu.writeRegister(0x84, 0); this.apu.resetFIFO(0); this.apu.resetFIFO(1);
+      }
+      if (flags & 128) {
+        this.io.fill(0, 0, 0x60); this.io.fill(0, 0xb0, 0x120); this.io.fill(0, 0x200, 0x20c);
+        this.dmaStall = 0;
+        for (const dma of this.dma) Object.assign(dma, { source: 0, destination: 0, initialDestination: 0, count: 0 });
+        for (const timer of this.timers) Object.assign(timer, { counter: 0, reload: 0, phase: 0 });
+        for (const offset of [0x20, 0x26, 0x30, 0x36]) this.setIO16(offset, 256);
+        this.setIO16(6, this.line);
+        this.io[4] = (this.line >= 160 && this.line < 227 ? 1 : 0) | (this.dot >= 960 ? 2 : 0)
+          | (this.line === 0 ? 4 : 0);
+      }
+      this.setIO16(0, 128);
+    }
     swi(number) {
       const r = this.cpu.r;
       if (number === 0) {
         const destination = this.read8(0x03007ffa) ? 0x02000000 : 0x08000000;
         this.iwram.fill(0, 0x7e00); this.cpu = new CPU(this); this.cpu.branch(destination); return;
       }
-      if (number === 1) {
-        const flags = r[0];
-        if (flags & 1) this.ewram.fill(0);
-        if (flags & 2) this.iwram.fill(0, 0, 0x7e00);
-        if (flags & 4) this.palette.fill(0);
-        if (flags & 8) this.vram.fill(0);
-        if (flags & 16) this.oam.fill(0);
-        if (flags & 32) { this.io.fill(0, 0x120, 0x130); this.io.fill(0, 0x134, 0x15a); }
-        if (flags & 64) {
-          this.io.fill(0, 0x60, 0xa8);
-          this.apu.writeRegister(0x84, 0); this.apu.resetFIFO(0); this.apu.resetFIFO(1);
-        }
-        if (flags & 128) {
-          this.io.fill(0, 0, 0x60); this.io.fill(0, 0xb0, 0x120); this.io.fill(0, 0x200, 0x20c);
-          this.dmaStall = 0;
-          for (const dma of this.dma) Object.assign(dma, { source: 0, destination: 0, initialDestination: 0, count: 0 });
-          for (const timer of this.timers) Object.assign(timer, { counter: 0, reload: 0, phase: 0 });
-          for (const offset of [0x20, 0x26, 0x30, 0x36]) this.setIO16(offset, 256);
-          this.setIO16(6, this.line);
-          this.io[4] = (this.line >= 160 && this.line < 227 ? 1 : 0) | (this.dot >= 960 ? 2 : 0)
-            | (this.line === 0 ? 4 : 0);
-        }
-        this.setIO16(0, 128); return;
-      }
+      if (number === 1) { this.registerRamReset(r[0]); return; }
       if (number === 2) { this.halted = true; return; }
       if (number === 3) { this.halted = true; this.stopped = true; return; }
       if (number === 4 || number === 5) {
         const mask = number === 5 ? 1 : r[1] & 0x3fff;
-        if (!mask) throw new Error("IntrWait GBA sans interruption selectionnee.");
+        if (!mask) throw this.cpu.fail("swi", "IntrWait GBA sans interruption selectionnee.", { swi: number });
         const flags = this.read16(0x03007ff8);
         if (number === 4 && !r[0] && flags & mask) { this.write16(0x03007ff8, flags & ~mask); return; }
         this.write16(0x03007ff8, flags & ~mask);
@@ -342,7 +364,7 @@
       }
       if (number === 6 || number === 7) {
         const numerator = r[number === 6 ? 0 : 1] | 0, denominator = r[number === 6 ? 1 : 0] | 0;
-        if (!denominator) throw new Error("Division BIOS GBA par zero.");
+        if (!denominator) throw this.cpu.fail("swi", "Division BIOS GBA par zero.", { swi: number });
         const result = Math.trunc(numerator / denominator);
         r[0] = result; r[1] = numerator % denominator; r[3] = Math.abs(result); return;
       }
@@ -377,7 +399,21 @@
       if (number === 0x13) { this.huffman(); return; }
       if (number === 0x16 || number === 0x17 || number === 0x18) { this.differenceFilter(number); return; }
       if (number === 0x0e || number === 0x0f) { this.affine(number); return; }
-      throw new Error(`Service BIOS GBA non pris en charge : SWI 0x${number.toString(16)}.`);
+      if (number === 0x0d) { r[0] = 0xbaae187f; return; }
+      if (number === 0x19) {
+        // The BIOS steps SOUNDBIAS to the target level; only the final level is reproduced.
+        this.setIO16(0x88, (this.io16(0x88) & ~0x3fe) | (r[0] ? 0x200 : 0));
+        return;
+      }
+      if (number === 0x1f) {
+        const frequency = this.read32(r[0] + 4), key = r[1] & 255, fine = r[2] & 255;
+        r[0] = Math.trunc(frequency / 2 ** ((180 - key - fine / 256) / 12));
+        return;
+      }
+      if (number === 0x26) { this.reset(this.cpu.r[14]); return; }
+      if (number === 0x27) { this.write8(0x04000301, r[2] & 255); return; }
+      throw this.cpu.fail("swi", `Service BIOS GBA non pris en charge : SWI 0x${number.toString(16)} a 0x${this.cpu.address.toString(16)}.`,
+        { swi: number });
     }
     affine(number) {
       const r = this.cpu.r, background = number === 0x0e, stride = background ? 2 : r[3];
