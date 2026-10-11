@@ -1,6 +1,9 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
 const { GameBoyAdvance } = require("../../gba/emulator.js");
 const { RTC } = require("../../gba/rtc.js");
 const { makeGBA } = require("./helpers.cjs");
@@ -130,4 +133,21 @@ test("the offset and control register survive a save and restore, and changes ra
   assert.equal(next.cartridge.rtc.offset, g.cartridge.rtc.offset);
   assert.equal(next.cartridge.rtc.now().getFullYear(), 2030);
   assert.throws(() => next.cartridge.restoreData({ ...data, rtc: { offset: 1.5, status: 0 } }), /RTC/);
+});
+
+test("the browser build gives the cartridge the RTC class from the global scope", () => {
+  const context = vm.createContext({});
+  for (const file of ["rtc.js", "cartridge.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "../../gba", file), "utf8"), context);
+  }
+  const contextBytes = vm.runInContext("Uint8Array", context);
+  const cartridge = new context.PocketGBACartridge(new contextBytes(makeGBA({ signature: "SIIRTC_V" })));
+  assert.ok(cartridge.rtc instanceof context.PocketGBARTC.RTC);
+});
+
+test("a GBA cartridge with an RTC answers the shared save session's clock hook", () => {
+  const cartridge = new GameBoyAdvance(makeGBA({ signature: "SIIRTC_V" })).cartridge;
+  assert.equal(cartridge.hasRTC, true);
+  assert.equal(typeof cartridge.updateRTC, "function");
+  assert.doesNotThrow(() => cartridge.updateRTC());
 });

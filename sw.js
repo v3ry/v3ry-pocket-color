@@ -1,7 +1,7 @@
 "use strict";
 
 // Bump this version whenever a cached application file changes.
-const CACHE = "v3ry-pocket-color-app-v45";
+const CACHE = "v3ry-pocket-color-app-v47";
 const ASSETS = ["index.html", "styles.css", "gbc/cpu.js", "gbc/cartridge.js", "gbc/audio.js",
   "gbc/emulator.js", "gbc/printer.js", "zip.js", "gbc/saves.js", "gbc/states.js", "gbc/graphics.js", "app.js", "pwa.js",
   "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "gbc/preset/aladdin.js",

@@ -2,7 +2,7 @@
   "use strict";
 
   const commonJS = typeof module !== "undefined" && module.exports;
-  const RTC = commonJS ? require("./rtc.js").RTC : root.PocketGBARTC;
+  const RTC = commonJS ? require("./rtc.js").RTC : root.PocketGBARTC.RTC;
   const MAX_ROM = 32 * 1024 * 1024;
   function containsText(bytes, text) {
     const codes = [...text].map(char => char.charCodeAt(0));
@@ -157,6 +157,9 @@
       if (this.rtc) data.rtc = this.rtc.saveData();
       return data;
     }
+    // The clock follows the host time plus a stored offset, so there is nothing to advance before a save.
+    // The shared save session calls this hook on every cartridge that reports hasRTC.
+    updateRTC() {}
     restoreData(data) {
       if (!data || data.version !== 1 || data.type !== this.type || !(data.ram instanceof Uint8Array) || !this.ramSizes.includes(data.ram.length)) {
         throw new Error("Sauvegarde de cartouche GBA incompatible ou corrompue.");
