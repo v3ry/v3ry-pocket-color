@@ -31,6 +31,7 @@
       this.flashID = false;
       this.erase = false;
       this.eepromBits = 0;
+      this.eepromCount = 0;
       this.resetEEPROM();
     }
     get ramSizes() { return this.kind === "EEPROM" ? [512, 8192] : [this.ram.length]; }

@@ -24,6 +24,7 @@
     <script src="gbc/world.js" defer></script>
     <script src="gbc/scene.js" defer></script>
     <script src="gba/cpu.js" defer></script>
+    <script src="gba/states.js" defer></script>
     <script src="gba/cartridge.js" defer></script>
     <script src="gba/audio.js" defer></script>
     <script src="gba/graphics.js" defer></script>
@@ -144,7 +145,7 @@
         </section>
         <canvas id="camera-capture" width="128" height="120" hidden></canvas>
         <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
-        <p class="status-message" id="console-status" role="status" hidden>GBA expérimentale : audio PSG et Direct Sound disponibles ; états, shaders et 3D non disponibles. Sauvegardes SRAM, Flash et EEPROM prises en charge. Certains services BIOS ne sont pas implémentés ; une erreur arrête explicitement l’émulation.</p>
+        <p class="status-message" id="console-status" role="status" hidden>GBA expérimentale : audio PSG et Direct Sound disponibles ; shaders et 3D non disponibles. États, sauvegardes SRAM, Flash et EEPROM prises en charge. Certains services BIOS ne sont pas implémentés ; une erreur arrête explicitement l’émulation.</p>
         <p id="comfort-status" class="status-message" role="status" aria-live="polite">Vitesse normale. Le son est coupé pendant l’avance rapide.</p>
         <p id="scene-status" class="status-message" role="status" aria-live="polite">Prototype 2.5D : chargez Pokémon Rouge FR, Cristal UE 1.1 ou Aladdin GBC pour activer un preset.</p>
         <details class="settings" id="camera-settings">
@@ -276,7 +277,7 @@
         <div class="help-icon" aria-hidden="true">?</div>
         <div>
           <h2>Prêt à jouer ?</h2>
-          <p>Clavier par défaut : flèches, A/Z sur AZERTY ou Q/W sur QWERTY, Entrée et Maj. GBA : E et R pour L/R. Touches personnalisables dans Commandes et performances. GB/GBC : F6 sauvegarde l’état sélectionné, F8 le recharge après confirmation. Manette standard : croix/stick gauche, boutons inférieurs A/B, Select, Start et boutons d’épaule L/R en GBA. Des boutons tactiles sont aussi disponibles.</p>
+          <p>Clavier par défaut : flèches, A/Z sur AZERTY ou Q/W sur QWERTY, Entrée et Maj. GBA : E et R pour L/R. Touches personnalisables dans Commandes et performances. GB/GBC/GBA : F6 sauvegarde l’état sélectionné, F8 le recharge après confirmation. Manette standard : croix/stick gauche, boutons inférieurs A/B, Select, Start et boutons d’épaule L/R en GBA. Des boutons tactiles sont aussi disponibles.</p>
           <p>Plein écran : bouton Plein écran ou touche F ; Échap pour quitter. Si le navigateur ne le permet pas, un mode immersif dans la page est proposé.</p>
           <p>ZIP : compression standard ou fichiers non compressés. Si plusieurs ROM sont présentes, choisissez le jeu à lancer. Le cœur maison est expérimental : certains jeux peuvent présenter des défauts.</p>
           <p>In-game : sauvegardez depuis le menu du jeu, puis choisissez Continuer au prochain lancement. L’enregistrement de la RAM ne garantit pas que le jeu y a écrit une sauvegarde valide. Les .sav contiennent la RAM, sans l’horloge.</p>

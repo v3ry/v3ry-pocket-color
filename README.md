@@ -13,7 +13,7 @@
 - Pause, redémarrage, plein écran, avance rapide et capture PNG à la résolution de la console. Le son des deux cœurs est disponible et le volume est réglable.
 - Affichage 2D original ; filtres et rendus expérimentaux 2.5D/3D pour le GB/GBC lorsque le jeu dispose d'un profil adapté.
 - Sauvegarde locale de la mémoire de cartouche, avec récupération, historique et import/export `.sav`.
-- Trois emplacements de sauvegarde d'état par jeu GB/GBC, avec aperçu et import/export `.state`.
+- Trois emplacements de sauvegarde d'état par jeu GB/GBC/GBA, avec aperçu et import/export `.state`.
 - Inspecteur graphique GB/GBC et indicateurs de performances pour les deux moteurs.
 - Application installable et utilisable hors ligne après préparation sur HTTPS ou localhost.
 
@@ -41,7 +41,7 @@ L'interface sélectionne le moteur d'après l'extension de la ROM, y compris dan
 | Select | Maj |
 | L / R (GBA) | E / R |
 | Plein écran | F |
-| Sauvegarder / charger un état (GB/GBC) | F6 / F8 |
+| Sauvegarder / charger un état (GB/GBC/GBA) | F6 / F8 |
 
 Les commandes peuvent être remappées dans **Commandes et performances**. Les raccourcis de sauvegarde demandent confirmation lors du chargement.
 
@@ -51,7 +51,7 @@ Les ROM restent sur votre appareil. Les sauvegardes sont stockées dans le navig
 
 Les sauvegardes `.sav` contiennent la mémoire de cartouche. Les sauvegardes `.state` reprennent l'émulation à un instant précis et sont propres à v3ry Pocket Color. Utilisez uniquement des fichiers et des jeux que vous êtes autorisé à utiliser. Aucune ROM ni aucun BIOS n'est fourni.
 
-Les cartouches GBA avec signatures SRAM, Flash (64/128 Kio) ou EEPROM (512 octets/8 Kio) sont prises en charge. La taille EEPROM est détectée à partir des commandes DMA3 ou du fichier `.sav` importé. Les sauvegardes GBA peuvent être importées, exportées et restaurées depuis l'historique. Les états `.state` restent réservés au GB/GBC.
+Les cartouches GBA avec signatures SRAM, Flash (64/128 Kio) ou EEPROM (512 octets/8 Kio) sont prises en charge. La taille EEPROM est détectée à partir des commandes DMA3 ou du fichier `.sav` importé. Les sauvegardes GBA peuvent être importées, exportées et restaurées depuis l'historique. Les états `.state` GBA sont liés à la ROM exacte : une fois chargés, ils reprennent l'émulation au même instant.
 
 Les exports EEPROM stockent les octets dans l'ordre du flux série (bit de poids fort en premier), par blocs de 8 octets. Certains émulateurs utilisent l'ordre inverse dans chaque bloc : leurs fichiers nécessitent une conversion avant import ; cet ordre n'est pas détectable automatiquement.
 
@@ -61,7 +61,7 @@ Les ZIP stockés ou DEFLATE sont acceptés jusqu'à 64 Mio, avec contrôle du CR
 
 Le projet est expérimental : la compatibilité et la précision de l'émulation ne sont pas garanties. Les rendus 2.5D/3D sont des prototypes visuels optionnels ; ils ne changent ni les règles ni les commandes du jeu. Les sauvegardes locales peuvent être supprimées par le navigateur.
 
-Le moteur GBA est une première implémentation, vérifiée avec des ROM synthétiques, pas une certification de la ludothèque. Il propose les modes vidéo 0 à 5, fonds à tuiles/affines, sprites, fenêtres et effets de couleur, avec une précision de timing approximative. L'audio comprend les quatre canaux PSG et les deux sorties Direct Sound avec FIFO, timers et DMA ; le mixage et la précision audio restent approximatifs. Certains services BIOS sont réimplémentés sans BIOS externe (division, racine carrée, ArcTan, BitUnPack, copie/remplissage, attentes, matrices affines BG/OBJ, Huffman, LZ77, RLE, filtres différentiels, somme de contrôle, SoundBias, MidiKey2Freq et CustomHalt) ; d'autres, notamment le pilote sonore du BIOS et MultiBoot, arrêtent explicitement l'émulation avec une erreur. Un saut à l'adresse 0 ou le service HardReset redémarre la console sans l'animation du logo. Le décodage couvre tous les groupes d'instructions ARM et Thumb de l'ARM7TDMI ; seules les instructions indéfinies (coprocesseur, extensions ARMv5 et suivantes) arrêtent l'émulation, et le timing des instructions reste approximatif. Le DMA3 en capture vidéo est pris en charge. Les périphériques de cartouche (dont RTC), le link, les états, les shaders et la 3D GBA ne sont pas implémentés.
+Le moteur GBA est une première implémentation, vérifiée avec des ROM synthétiques, pas une certification de la ludothèque. Il propose les modes vidéo 0 à 5, fonds à tuiles/affines, sprites, fenêtres et effets de couleur, avec une précision de timing approximative. L'audio comprend les quatre canaux PSG et les deux sorties Direct Sound avec FIFO, timers et DMA ; le mixage et la précision audio restent approximatifs. Certains services BIOS sont réimplémentés sans BIOS externe (division, racine carrée, ArcTan, BitUnPack, copie/remplissage, attentes, matrices affines BG/OBJ, Huffman, LZ77, RLE, filtres différentiels, somme de contrôle, SoundBias, MidiKey2Freq, CustomHalt et le pilote sonore HLE 0x1A à 0x24, 0x28 et 0x29, avec les canaux carrés 1 et 2 seulement) ; d'autres, notamment SoundGetJumpList (0x2A) et MultiBoot, arrêtent explicitement l'émulation avec une erreur. Un saut à l'adresse 0 ou le service HardReset redémarre la console sans l'animation du logo. Le décodage couvre tous les groupes d'instructions ARM et Thumb de l'ARM7TDMI ; seules les instructions indéfinies (coprocesseur, extensions ARMv5 et suivantes) arrêtent l'émulation, et le timing des instructions reste approximatif. Le DMA3 en capture vidéo est pris en charge. Les périphériques de cartouche (dont RTC), le link, les shaders et la 3D GBA ne sont pas implémentés.
 
 Référence matérielle : [GBATEK](https://mgba-emu.github.io/gbatek/). Aucun code de moteur tiers ni données graphiques de jeu ne sont intégrés.
 

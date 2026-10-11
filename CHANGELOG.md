@@ -6,6 +6,7 @@ Les changements notables de chaque version sont consignés ici.
 
 ### Ajouté
 
+- GBA : sauvegardes d'état (slots, sauvegarde et chargement rapides, export/import `.state` et aperçu), comme pour GB/GBC. Le format `v3ry-pocket-color-gba-state` est distinct de celui du GB/GBC ; un état ne se charge que dans la même ROM et est entièrement validé avant d'être appliqué.
 - GBA : pilote sonore HLE pour les services BIOS 0x1A à 0x24, 0x28 et 0x29 (init, mode, main, VSync, clear, start, stop, continue, fade-out). Seuls les canaux carrés 1 et 2 du PSG sont joués. Le format de partition est documenté dans `gba/emulator.js`. Il n'a été validé que par des tests synthétiques : aucun jeu testé n'appelle ces services, et les noms BIOS exacts restent à confirmer. `SoundGetJumpList` (0x2A) reste non pris en charge.
 
 ### Corrigé

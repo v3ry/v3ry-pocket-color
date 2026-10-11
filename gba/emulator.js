@@ -40,6 +40,7 @@
       this.dma = Array.from({ length: 4 }, () => ({ source: 0, destination: 0, initialDestination: 0, count: 0 }));
       this.timers = Array.from({ length: 4 }, () => ({ counter: 0, reload: 0, phase: 0 }));
       this.dmaStall = 0; this.dmaBusy = false;
+      this.openBus = 0;
       this.lastStop = null;
       this.resets = [];
       this.soundDriver = { area: 0, mode: 0, vsync: true, vsyncCount: 0, players: new Set() };

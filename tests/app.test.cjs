@@ -13,6 +13,7 @@ const ZIP = require("../zip.js");
 const { makeDemoROM, makeROM, makeZIP, memorySaveStore } = require("./gbc/helpers.cjs");
 const { SaveSession } = require("../gbc/saves.js");
 const States = require("../gbc/states.js");
+const GBAStates = require("../gba/states.js");
 const Graphics = require("../gbc/graphics.js");
 const Scene = require("../gbc/scene.js");
 const AladdinPreset = require("../gbc/preset/aladdin.js");
@@ -125,6 +126,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketGameBoy: GameBoy, PocketGameBoyAdvance: GameBoyAdvance, PocketGameBoyPrinter: GameBoyPrinter, PocketZIP: ZIP,
     PocketSaves: { SaveStore: class { constructor() { return store; } }, SaveSession },
     PocketStates: States,
+    PocketGBAStates: GBAStates,
     PocketGraphics: Graphics,
     PocketPresets: [AladdinPreset, CrystalPreset, RedPreset],
     PocketScene: { ...Scene, Renderer: class {
@@ -211,7 +213,7 @@ test("GBA loads, renders native dimensions, pauses and returns to GB without los
   assert.equal(h.evaluate("isGBA()"), true);
   assert.equal(h.element("#game-canvas").width, 240); assert.equal(h.element("#game-canvas").height, 160);
   assert.equal(h.element("#sound-button").disabled, false);
-  assert.equal(h.element("#save-state").disabled, true);
+  assert.equal(h.element("#save-state").disabled, false);
   assert.equal(h.element("#camera-settings").hidden, true);
   h.evaluate("emulator.pixels.fill(0); emulator.framePixels.fill(0); emulator.framePixels.set([0, 255, 0, 255], 0); draw()");
   assert.deepEqual([...h.element("#game-canvas").image.data.slice(0, 4)], [0, 255, 0, 255]);
@@ -362,7 +364,7 @@ test("mixed-console ZIPs select GB/GBA and malformed GBA leaves the running game
   assert.equal(h.evaluate("isGBA()"), true);
   await load(h, "bad.gba", new Uint8Array(192));
   assert.equal(h.evaluate("isGBA()"), true); assert.match(h.element("#status-message").textContent, /En-tete/);
-  await h.element("#save-state").fire("click"); assert.match(h.element("#state-status").textContent, /non disponibles/);
+  await h.element("#save-state").fire("click"); assert.match(h.element("#state-status").textContent, /enregistré/);
 });
 
 test("GBA EEPROM ZIP loading, both import sizes, export, history and fresh launch preserve saves", async () => {

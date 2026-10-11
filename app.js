@@ -345,11 +345,11 @@ function updateSaveButtons() {
   exportButton.disabled = importButton.disabled = busy || !emulator?.cartridge.ram.length;
   reloadSaveButton.disabled = recoverSaveButton.disabled = busy || !saveSession;
   for (const button of [saveStateButton, loadStateButton, exportStateButton, importStateButton]) {
-    button.disabled = busy || !emulator || !gameKey || isGBA();
+    button.disabled = busy || !emulator || !gameKey;
   }
   restoreHistoryButton.disabled = busy || !saveSession || !ramHistory.value;
-  stateSlot.disabled = stateName.disabled = busy || !emulator || isGBA();
-  quickSaveButton.disabled = quickLoadButton.disabled = busy || !emulator || !gameKey || isGBA();
+  stateSlot.disabled = stateName.disabled = busy || !emulator;
+  quickSaveButton.disabled = quickLoadButton.disabled = busy || !emulator || !gameKey;
 }
 
 async function saveCurrent(notify = false) {
@@ -666,6 +666,7 @@ sceneCanvas.addEventListener("webglcontextlost", event => {
 });
 
 function isGBA(game = emulator) { return game?.system === "gba"; }
+function statesFor(game = emulator) { return isGBA(game) ? PocketGBAStates : PocketStates; }
 function createEmulator(bytes, name) {
   const game = /\.gba$/i.test(name) ? new PocketGameBoyAdvance(bytes, audioContext?.sampleRate || 48000)
     : new PocketGameBoy(bytes, audioContext?.sampleRate || 48000);
@@ -927,8 +928,7 @@ function startGame(bytes, name, version = loadVersion) {
       setSaveStatus(session ? restored ? "RAM in-game restaurée avant le démarrage. Choisissez Continuer dans le jeu."
         : "Aucune sauvegarde in-game locale. Enregistrement automatique de la RAM activé."
         : "Cette cartouche n’a pas de RAM de sauvegarde ni d’horloge.");
-      setStateStatus(isGBA() ? "GBA : sauvegardes d’état non disponibles. Utilisez la sauvegarde du jeu et les exports .sav."
-        : "État indépendant : sauvegardez un instant, puis chargez-le avec Charger l’état.");
+      setStateStatus("État indépendant : sauvegardez un instant, puis chargez-le avec Charger l’état.");
       historyCopies = [];
       ramHistory.replaceChildren();
       refreshStateSlot();
@@ -1161,8 +1161,7 @@ function activateRestored(candidate, session, fromState) {
   draw();
   updateSaveButtons();
   canvas.focus();
-  if (!fromState) setStateStatus(isGBA() ? "GBA : états non disponibles ; sauvegarde de cartouche active."
-    : "États indépendants disponibles dans les trois emplacements ; aucun état actif.");
+  if (!fromState) setStateStatus("États indépendants disponibles dans les trois emplacements ; aucun état actif.");
 }
 
 async function restoreLocalRAM(recovery = false, historyCopy = null) {
@@ -1226,7 +1225,6 @@ async function refreshStateSlot() {
   statePreview.hidden = true;
   stateInfo.textContent = "Lecture de l’emplacement…";
   stateName.value = "";
-  if (isGBA()) { stateInfo.textContent = "États GBA non disponibles."; return; }
   if (!key) { stateInfo.textContent = "Chargez un jeu."; return; }
   try {
     const data = await saveStore.read(storageKey);
@@ -1277,11 +1275,10 @@ restoreHistoryButton.addEventListener("click", () => {
 });
 
 saveStateButton.addEventListener("click", async () => {
-  if (isGBA()) { setStateStatus("Sauvegardes d’état GBA non disponibles ; utilisez les fichiers .sav.", true); return; }
   if (!emulator || transitioning || importing) return;
   const target = emulator, key = gameKey, slot = stateSlot.value || "1";
   try {
-    const data = PocketStates.capture(target, key);
+    const data = statesFor(target).capture(target, key);
     data.name = stateName.value.trim().slice(0, 60);
     draw();
     data.preview = canvas.toDataURL("image/png");
@@ -1299,12 +1296,12 @@ saveStateButton.addEventListener("click", async () => {
 });
 
 async function restoreState(data, target, key, version) {
-  if (isGBA(target)) throw new Error("Sauvegardes d'etat GBA non disponibles.");
   if (target !== emulator || key !== gameKey || version !== loadVersion || transitioning || importing) {
     throw new Error("Le jeu a changé pendant la lecture de l’état. Réessayez.");
   }
-  const candidate = new PocketGameBoy(loadedBytes, audioContext?.sampleRate || 48000);
-  PocketStates.restore(candidate, data, key);
+  const candidate = isGBA(target) ? createEmulator(loadedBytes, loadedName)
+    : new PocketGameBoy(loadedBytes, audioContext?.sampleRate || 48000);
+  statesFor(target).restore(candidate, data, key);
   if (!window.confirm("Charger cet état remplace la partie en cours. La sauvegarde in-game locale restera inchangée. Continuer ?")) return;
   importing = true;
   loadVersion++;
@@ -1327,7 +1324,6 @@ async function restoreState(data, target, key, version) {
   }
 }
 loadStateButton.addEventListener("click", async () => {
-  if (isGBA()) { setStateStatus("Sauvegardes d’état GBA non disponibles ; utilisez les fichiers .sav.", true); return; }
   if (!emulator || transitioning || importing) return;
   const target = emulator, key = gameKey, version = loadVersion;
   try {
@@ -1340,11 +1336,10 @@ loadStateButton.addEventListener("click", async () => {
   }
 });
 exportStateButton.addEventListener("click", () => {
-  if (isGBA()) { setStateStatus("Sauvegardes d’état GBA non disponibles ; utilisez les fichiers .sav.", true); return; }
   if (!emulator || transitioning || importing) return;
   try {
-    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc)$/i, "") + ".state";
-    downloadFile(PocketStates.encode(PocketStates.capture(emulator, gameKey)), name);
+    const name = loadedName.split(/[\\/]/).pop().replace(/\.(gb|gbc|gba)$/i, "") + ".state";
+    downloadFile(statesFor(emulator).encode(statesFor(emulator).capture(emulator, gameKey)), name);
     setStateStatus("Export .state lancé : instant complet, réservé à cet émulateur et à cette ROM.");
   } catch (error) {
     setStateStatus(`Export d’état impossible : ${error.message}`, true);
@@ -1356,11 +1351,10 @@ stateInput.addEventListener("change", async () => {
   const file = stateInput.files[0];
   stateInput.value = "";
   if (!file || !emulator || transitioning || importing) return;
-  if (isGBA()) { setStateStatus("Import d’état GBA non disponible ; utilisez les fichiers .sav.", true); return; }
   const target = emulator, key = gameKey, version = loadVersion;
   try {
     if (!/\.state$/i.test(file.name)) throw new Error("Choisissez un fichier .state de v3ry Pocket Color, pas un .sav.");
-    const data = await PocketStates.decode(file);
+    const data = await statesFor(target).decode(file);
     await restoreState(data, target, key, version);
   } catch (error) {
     setStateStatus(`Import d’état impossible : ${error.message}`, true);
@@ -1425,7 +1419,6 @@ window.addEventListener("keydown", (event) => {
   if (["F6", "F8"].includes(event.code) && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey
     && !event.target.closest("input, select, textarea, button, a, [contenteditable]")) {
     event.preventDefault();
-    if (isGBA()) { setStateStatus("États GBA non disponibles : utilisez la sauvegarde du jeu ou un fichier .sav.", true); return; }
     (event.code === "F6" ? saveStateButton : loadStateButton).click();
     return;
   }
