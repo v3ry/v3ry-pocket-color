@@ -66,6 +66,27 @@ test("Direct Sound mixes signed FIFO samples at the selected timer rate", () => 
   assert.equal(g.apu.fifos[0].output, 0);
 });
 
+test("Direct Sound FIFO refill is retried after a timer overflow that found DMA1 disarmed", () => {
+  const g = game();
+  g.write16(0x04000084, 0x0080);
+  g.write16(0x04000082, 0x030c);
+  for (let i = 0; i < 16; i++) g.write8(0x02000000 + i, 0x40 + i);
+  g.write32(0x040000bc, 0x02000000);
+  g.write32(0x040000c0, 0x040000a0);
+  g.write16(0x040000c4, 1);
+  g.write16(0x04000100, 0xfffe);
+  g.write16(0x04000102, 0x0080);
+  g.tick(2);
+  assert.equal(g.apu.fifos[0].length, 0);
+  g.write16(0x040000c6, 0xb640);
+  g.write16(0x04000102, 0);
+  g.write16(0x04000100, 0xfffe);
+  g.write16(0x04000102, 0x0080);
+  g.tick(2);
+  assert.equal(g.apu.fifos[0].length, 16);
+  assert.equal(g.dma[1].source, 0x02000010);
+});
+
 test("Timer overflow refills Direct Sound through repeating DMA1 word transfers", () => {
   const g = game();
   g.write16(0x04000084, 0x0080);

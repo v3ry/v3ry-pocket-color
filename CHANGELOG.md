@@ -2,6 +2,12 @@
 
 Les changements notables de chaque version sont consignés ici.
 
+## [Non publié]
+
+### Corrigé
+
+- GBA : le son Direct Sound manquait dans Super Mario Advance. Une demande de remplissage de FIFO faite pendant que le DMA son était désarmé restait bloquée et n'était jamais renouvelée. Chaque dépassement de minuteur demande désormais le remplissage tant que la FIFO contient 16 octets ou moins.
+
 ## [0.11.0] - 2026-10-11
 
 ### Ajouté

@@ -16,7 +16,7 @@
       this.sampleClock = 0;
       this.frameClock = 0;
       this.fifos = Array.from({ length: 2 }, () => ({
-        data: new Int8Array(32), head: 0, length: 0, output: 0, refill: false,
+        data: new Int8Array(32), head: 0, length: 0, output: 0,
       }));
       this.highpass = [0, 0];
       this.sampleLeft = 0;
@@ -76,14 +76,13 @@
     }
     resetFIFO(index) {
       const fifo = this.fifos[index];
-      fifo.head = 0; fifo.length = 0; fifo.output = 0; fifo.refill = false;
+      fifo.head = 0; fifo.length = 0; fifo.output = 0;
     }
     writeFIFO(offset, value) {
       const fifo = this.fifos[offset < 0xa4 ? 0 : 1];
       if (fifo.length === 32) return;
       fifo.data[(fifo.head + fifo.length) & 31] = value << 24 >> 24;
       fifo.length++;
-      if (fifo.length >= 16) fifo.refill = false;
     }
     timerOverflow(timer, count, requestDMA) {
       for (let index = 0; index < this.fifos.length; index++) {
@@ -96,10 +95,7 @@
             fifo.head = (fifo.head + 1) & 31;
             fifo.length--;
           }
-          if (fifo.length <= 16 && !fifo.refill) {
-            fifo.refill = true;
-            requestDMA(FIFO_ADDRESSES[index]);
-          }
+          if (fifo.length <= 16) requestDMA(FIFO_ADDRESSES[index]);
         }
       }
     }
