@@ -51,6 +51,26 @@ test("Direct Sound routing keeps left and right sides separate", () => {
   assert.ok(g.apu.sampleRight > 0.1);
 });
 
+test("a full-volume PSG channel peaks at a quarter of full-scale Direct Sound", () => {
+  const g = game();
+  g.write16(0x04000084, 0x0080);
+  g.write16(0x04000080, 0x1077);
+  g.write16(0x04000082, 0x0002);
+  g.write16(0x04000062, 0xf080);
+  g.write16(0x04000064, 0x8400);
+  let peak = 0;
+  for (let i = 0; i < 4000; i++) {
+    g.apu.sample();
+    peak = Math.max(peak, Math.abs(g.apu.sampleLeft));
+  }
+  g.apu.fifos[0].output = 127;
+  g.write16(0x04000080, 0x0077);
+  g.write16(0x04000082, 0x0204);
+  g.apu.sample();
+  const fifoPeak = g.apu.sampleLeft;
+  assert.ok(Math.abs(peak - fifoPeak / 4) < 0.01, `psg ${peak} fifo ${fifoPeak}`);
+});
+
 test("Direct Sound mixes signed FIFO samples at the selected timer rate", () => {
   const g = game();
   g.write16(0x04000084, 0x0080);
@@ -142,4 +162,32 @@ test("Sound master disable clears channels and Direct Sound FIFO; sample rate is
   g2.write16(0x04000084, 0x0080); g2.write16(0x04000082, 0x8008);
   assert.equal(g2.apu.fifos[1].length, 0);
   assert.equal(g2.apu.soundControl[3] & 0x80, 0);
+});
+
+test("wave channel is silent once its DAC is switched off", () => {
+  const g = game();
+  g.write16(0x04000084, 0x0080);
+  g.write16(0x04000080, 0xff77);
+  for (let i = 0; i < 16; i++) g.write8(0x04000090 + i, 0xef);
+  g.write16(0x04000070, 0x0080);
+  g.write16(0x04000072, 0x2000);
+  g.write16(0x04000074, 0x8000);
+  g.apu.sample();
+  assert.notEqual(g.apu.sampleLeft, 0);
+  g.write16(0x04000070, 0);
+  g.apu.sample();
+  assert.equal(g.apu.sampleLeft, 0);
+  assert.equal(g.apu.sampleRight, 0);
+});
+
+test("master disable keeps SOUNDCNT_H while clearing SOUNDCNT_L", () => {
+  const g = game();
+  g.write16(0x04000084, 0x0080);
+  g.write16(0x04000080, 0xff77);
+  g.write16(0x04000082, 0x0304);
+  g.write16(0x04000084, 0);
+  assert.equal(g.read8(0x04000080), 0);
+  assert.equal(g.read8(0x04000081), 0);
+  assert.equal(g.read8(0x04000082), 0x04);
+  assert.equal(g.read8(0x04000083), 0x03);
 });

@@ -13,6 +13,10 @@ Les changements notables de chaque version sont consignés ici.
 
 - GBA : le son Direct Sound manquait dans Super Mario Advance. Une demande de remplissage de FIFO faite pendant que le DMA son était désarmé restait bloquée et n'était jamais renouvelée. Chaque dépassement de minuteur demande désormais le remplissage tant que la FIFO contient 16 octets ou moins.
 - GBA : le Direct Sound était envoyé du mauvais côté. Les bits de routage gauche et droite de SOUNDCNT_H et le volume gauche de SOUNDCNT_L étaient inversés.
+- GBA : le canal ondes du PSG continuait de sonner après l'arrêt de son compteur ou la coupure de son DAC (NR30). Il est désormais silencieux dans ces cas.
+- GBA : la coupure du son (SOUNDCNT_X bit 7) effaçait SOUNDCNT_H, alors que le matériel le conserve. SOUNDCNT_L est toujours remis à zéro, et sa lecture ne renvoie plus une valeur périmée.
+- GBA : en mode bitmap 4, l'index de couleur 0 était opaque. Il est désormais transparent, comme en mode tuile : un sprite de priorité supérieure ne reste plus masqué.
+- GBA : les canaux PSG étaient environ 4,6 fois plus forts que le Direct Sound par rapport au matériel. Un canal au maximum vaut désormais un quart de la pleine échelle Direct Sound, comme dans GBATEK. Les jeux qui jouent surtout avec le PSG sonnent donc nettement plus bas qu'avant.
 
 ## [0.11.0] - 2026-10-11
 

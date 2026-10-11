@@ -166,7 +166,10 @@
         this.apu.writeFIFO(offset, value);
         return;
       }
-      if (offset >= 0x60 && offset <= 0x9f) value = this.apu.writeRegister(offset, value);
+      if (offset >= 0x60 && offset <= 0x9f) {
+        value = this.apu.writeRegister(offset, value);
+        if (offset === 0x84 && !this.apu.master) this.io.fill(0, 0x80, 0x82);
+      }
       if (offset === 0x202 || offset === 0x203) { this.io[offset] &= ~value; return; }
       if (offset === 0x301) {
         this.halted = true; this.stopped = !!(value & 128); return;

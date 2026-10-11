@@ -100,3 +100,12 @@ test("windows and brightness effects apply only to selected layers and regions",
   g.write16(0x04000050, 0xe0); g.write16(0x04000054, 16); g.graphics.line(0);
   assert.deepEqual(pixel(g), [0, 0, 0, 255]); assert.deepEqual(pixel(g, 1), [255, 0, 0, 255]);
 });
+
+test("bitmap mode 4 palette index 0 is transparent so lower sprites show through", () => {
+  const g = game(); g.write16(0x04000000, 0x1404);
+  for (let i = 0; i < 128; i++) g.write16(0x07000000 + i * 8, 512);
+  g.write16(0x07000000, 0); g.write16(0x07000004, 512 | 2 << 10);
+  g.vram[0x14000] = 1; g.write16(0x05000202, 31);
+  g.graphics.line(0);
+  assert.deepEqual(pixel(g), [255, 0, 0, 255]);
+});

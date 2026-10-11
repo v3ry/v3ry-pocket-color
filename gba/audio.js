@@ -50,7 +50,7 @@
           if (!enabled && this.master) {
             this.psg.write(0xff26, 0);
             this.resetFIFO(0); this.resetFIFO(1);
-            this.soundControl.fill(0);
+            this.soundControl.fill(0, 0, 2);
           } else if (enabled && !this.master) this.psg.write(0xff26, 128);
           this.master = enabled;
           value &= 128;
@@ -102,7 +102,10 @@
     waveSample() {
       const control = this.psg.registers[10], dimension = control & 64 ? 64 : 32;
       const frequency = this.psg.frequency(2);
-      if (frequency === 2048) return 0;
+      if (!this.psg.channels[2].enabled || frequency === 2048) {
+        this.wavePhase = 0;
+        return 0;
+      }
       this.wavePhase = (this.wavePhase + 65536 / (2048 - frequency) / this.sampleRate) % 1;
       const index = Math.floor(this.wavePhase * dimension);
       const bank = dimension === 64 ? index >>> 5 : control & 32 ? 1 : 0;
@@ -126,7 +129,8 @@
         if (control & 1 << (shift + 1)) psg += channel1;
         if (control & 1 << (shift + 2)) psg += channel2;
         if (control & 1 << (shift + 3)) psg += channel3;
-        mixed += psg * psgVolume * (volume + 1) / 28;
+        // A full-volume PSG channel is a quarter of full-scale Direct Sound (GBATEK).
+        mixed += psg * psgVolume * (volume + 1) / 128;
         for (let index = 0; index < 2; index++) {
           const routeBit = (index ? 12 : 8) + (left ? 1 : 0);
           if (!(direct & 1 << routeBit)) continue;

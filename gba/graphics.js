@@ -40,8 +40,10 @@
           const [sx, sy] = this.affine(bg, x - x % mx, yline);
           const width = mode === 5 ? 160 : 240, height = mode === 5 ? 128 : 160;
           if (sx < 0 || sx >= width || sy < 0 || sy >= height) continue;
-          this.bgColors[target + x] = mode === 4 ? word(g.palette, v[frame + sy * 240 + sx] * 2)
-            : word(v, (mode === 5 ? frame : 0) + (sy * width + sx) * 2);
+          if (mode === 4) {
+            const index = v[frame + sy * 240 + sx];
+            this.bgColors[target + x] = index ? word(g.palette, index * 2) : -1;
+          } else this.bgColors[target + x] = word(v, (mode === 5 ? frame : 0) + (sy * width + sx) * 2);
         }
         return;
       }
