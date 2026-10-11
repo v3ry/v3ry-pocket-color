@@ -40,6 +40,7 @@
       this.dma = Array.from({ length: 4 }, () => ({ source: 0, destination: 0, initialDestination: 0, count: 0 }));
       this.timers = Array.from({ length: 4 }, () => ({ counter: 0, reload: 0, phase: 0 }));
       this.dmaStall = 0; this.dmaBusy = false;
+      this.serialRemaining = 0;
       this.openBus = 0;
       this.lastStop = null;
       this.resets = [];
@@ -72,6 +73,12 @@
         if ((control >>> 12 & 3) === 3 && this.dma[index].destination === address) this.transfer(index);
       }
     }
+    gpioRegister(address) {
+      const region = address >>> 24;
+      if (!this.cartridge.rtc || region < 8 || region > 13) return -1;
+      const port = address & 0xfffffe;
+      return port === 0xc4 || port === 0xc6 || port === 0xc8 ? port : -1;
+    }
     read8(address) {
       address >>>= 0;
       const region = address >>> 24;
@@ -88,6 +95,8 @@
       return memory ? memory[0][memory[1]] : (this.openBus || 0) >>> ((address & 3) * 8) & 255;
     }
     read16(address) {
+      const gpio = this.gpioRegister(address);
+      if (gpio >= 0) return this.cartridge.rtc.readRegister(gpio);
       if (this.cartridge.isEEPROM(address)) return this.cartridge.readEEPROM();
       if ((address >>> 24) === 14 || (address >>> 24) === 15) return this.read8(address) * 0x101;
       address &= ~1;
@@ -112,7 +121,7 @@
       if ((address >>> 24) === 14 || (address >>> 24) === 15) return (this.read8(address) * 0x01010101) >>> 0;
       address &= ~3;
       const region = address >>> 24;
-      if (region >= 8 && region <= 13 && !this.cartridge.isEEPROM(address)
+      if (region >= 8 && region <= 13 && this.gpioRegister(address) < 0 && !this.cartridge.isEEPROM(address)
         && !this.cartridge.isEEPROM(address + 2)) {
         return (this.cartridge.readROM(address) | this.cartridge.readROM(address + 1) << 8
           | this.cartridge.readROM(address + 2) << 16 | this.cartridge.readROM(address + 3) << 24) >>> 0;
@@ -146,8 +155,11 @@
     }
     write16(address, value) {
       address &= ~1;
+      const gpio = this.gpioRegister(address);
+      if (gpio >= 0) { this.cartridge.rtc.writeRegister(gpio, value); return; }
       if (this.cartridge.isEEPROM(address)) { this.cartridge.writeEEPROM(value); return; }
       if ((address >>> 24) >= 14) { this.cartridge.writeRAM(address, value >>> ((address & 1) * 8)); return; }
+      if (address === 0x04000128) { this.writeSIOCNT(value); return; }
       if ((address >>> 24) === 4) {
         this.writeIO(address - 0x04000000, value & 255); this.writeIO(address - 0x04000000 + 1, value >>> 8 & 255); return;
       }
@@ -162,6 +174,8 @@
     }
     writeIO(offset, value) {
       if (offset < 0 || offset >= 1024 || offset === 6 || offset === 7 || offset === 0x130 || offset === 0x131) return;
+      if (offset === 0x128) { this.writeSIOCNT(value | this.io[0x129] << 8); return; }
+      if (offset === 0x129) { this.writeSIOCNT(this.io[0x128] | value << 8); return; }
       if (offset >= 0xa0 && offset <= 0xa7) {
         this.apu.writeFIFO(offset, value);
         return;
@@ -197,6 +211,35 @@
         }
       }
       if (offset === 0x132 || offset === 0x133) this.checkKeys();
+    }
+    // Without a cable the SI line reads high and no other unit answers, so transfers only time out and report that.
+    writeSIOCNT(value) {
+      value &= 0xffff;
+      const mode = value >>> 12 & 3, wasBusy = (this.io[0x128] & 0x80) !== 0;
+      if (mode === 2) value &= ~0x7c;
+      else if (mode < 2) value |= 4;
+      if (mode === 3) value &= ~0x80;
+      if (this.serialRemaining) value |= 0x80;
+      this.setIO16(0x128, value);
+      if (!(value & 0x80) || wasBusy) return;
+      if (mode === 2) {
+        this.serialRemaining = Math.round(16 * this.clock / [9600, 38400, 57600, 115200][value & 3]);
+      } else if (mode < 2 && value & 1) {
+        this.serialRemaining = Math.round((value & 0x1000 ? 32 : 8) * this.clock / (value & 2 ? 2097152 : 262144));
+      }
+    }
+    finishSerial() {
+      const control = this.io16(0x128);
+      if ((control >>> 12 & 3) === 2) {
+        this.setIO16(0x120, this.io16(0x12a));
+        for (const offset of [0x122, 0x124, 0x126]) this.setIO16(offset, 0xffff);
+        this.setIO16(0x128, (control & ~0x80) | 0x40);
+      } else {
+        if (control & 0x1000) this.io.fill(0xff, 0x120, 0x124);
+        else this.io[0x12a] = 0xff;
+        this.setIO16(0x128, control & ~0x80);
+      }
+      if (control & 0x4000) this.interrupt(0x80);
     }
     transfer(index) {
       const base = 0xb0 + index * 12, control = this.io16(base + 10), dma = this.dma[index];
@@ -284,6 +327,10 @@
       this.cartridge.tick(cycles);
       this.apu.tick(cycles);
       this.tickTimers(cycles);
+      if (this.serialRemaining) {
+        this.serialRemaining = Math.max(0, this.serialRemaining - cycles);
+        if (!this.serialRemaining) this.finishSerial();
+      }
       while (cycles > 0) {
         const end = this.dot < 960 ? 960 : 1232, step = Math.min(cycles, end - this.dot);
         this.dot += step; cycles -= step;
@@ -352,7 +399,10 @@
       if (flags & 4) this.palette.fill(0);
       if (flags & 8) this.vram.fill(0);
       if (flags & 16) this.oam.fill(0);
-      if (flags & 32) { this.io.fill(0, 0x120, 0x130); this.io.fill(0, 0x134, 0x15a); }
+      if (flags & 32) {
+        this.io.fill(0, 0x120, 0x130); this.io.fill(0, 0x134, 0x15a);
+        this.serialRemaining = 0;
+      }
       if (flags & 64) {
         this.io.fill(0, 0x60, 0xa8);
         this.apu.writeRegister(0x84, 0); this.apu.resetFIFO(0); this.apu.resetFIFO(1);

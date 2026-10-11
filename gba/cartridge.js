@@ -1,7 +1,16 @@
 (function (root) {
   "use strict";
 
+  const commonJS = typeof module !== "undefined" && module.exports;
+  const RTC = commonJS ? require("./rtc.js").RTC : root.PocketGBARTC;
   const MAX_ROM = 32 * 1024 * 1024;
+  function containsText(bytes, text) {
+    const codes = [...text].map(char => char.charCodeAt(0));
+    for (let i = 0; i + codes.length <= bytes.length; i++) {
+      if (bytes[i] === codes[0] && codes.every((code, j) => bytes[i + j] === code)) return true;
+    }
+    return false;
+  }
   class Cartridge {
     constructor(bytes) {
       if (!(bytes instanceof Uint8Array) || bytes.length < 192 || bytes.length > MAX_ROM) {
@@ -24,7 +33,8 @@
       this.type = `GBA:${found || "NONE"}`;
       this.ram = new Uint8Array(this.kind === "EEPROM" ? 512 : this.kind === "SRAM" ? 32768 : this.kind === "FLASH" ? found === "FLASH1M_V" ? 131072 : 65536 : 0);
       this.ram.fill(255);
-      this.hasRTC = false;
+      this.hasRTC = containsText(bytes, "SIIRTC_V");
+      this.rtc = this.hasRTC ? new RTC({ onChange: () => { this.saveRevision++; } }) : null;
       this.saveRevision = 0;
       this.flashBank = 0;
       this.flashState = 0;
@@ -142,11 +152,17 @@
       }
       this.ram.set(bytes); this.saveRevision++;
     }
-    saveData() { return { version: 1, type: this.type, ram: this.exportRAM() }; }
+    saveData() {
+      const data = { version: 1, type: this.type, ram: this.exportRAM() };
+      if (this.rtc) data.rtc = this.rtc.saveData();
+      return data;
+    }
     restoreData(data) {
       if (!data || data.version !== 1 || data.type !== this.type || !(data.ram instanceof Uint8Array) || !this.ramSizes.includes(data.ram.length)) {
         throw new Error("Sauvegarde de cartouche GBA incompatible ou corrompue.");
       }
+      // Saves made before the clock existed have no RTC section; the clock then keeps its current offset.
+      if (this.rtc && data.rtc !== undefined) this.rtc.restoreData(data.rtc);
       if (this.kind === "EEPROM") this.importRAM(data.ram);
       else { this.ram.set(data.ram); this.saveRevision++; }
     }

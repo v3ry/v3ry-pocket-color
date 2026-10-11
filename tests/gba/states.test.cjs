@@ -107,3 +107,81 @@ test("GBA states carry an EEPROM save that changed size", async () => {
   assert.deepEqual(restored.cartridge.ram, save);
   assert.equal(restored.cartridge.saveRevision, revision + 1);
 });
+
+const GPIO = 0x080000c4, DIRECTION = 0x080000c6, CONTROL = 0x080000c8;
+const CLOCK = new Date(2026, 4, 17, 13, 5, 9).getTime();
+
+function clockGame(rom) {
+  const game = new GameBoyAdvance(rom);
+  game.cartridge.rtc.clock = () => CLOCK;
+  return game;
+}
+
+// Starts a clock command and leaves the transfer open so the state is captured mid-transaction.
+function startCommand(game, command) {
+  game.write16(CONTROL, 1);
+  game.write16(DIRECTION, 7);
+  game.write16(GPIO, 0); game.write16(GPIO, 4);
+  for (let bit = 0; bit < 8; bit++) {
+    const sio = command >>> bit & 1;
+    game.write16(GPIO, 4 | sio << 1); game.write16(GPIO, 5 | sio << 1);
+  }
+}
+
+function readBits(game, count) {
+  game.write16(DIRECTION, 5);
+  let value = 0;
+  for (let bit = 0; bit < count; bit++) {
+    game.write16(GPIO, 4);
+    value |= (game.read16(GPIO) >> 1 & 1) << bit;
+    game.write16(GPIO, 5);
+  }
+  return value;
+}
+
+test("GBA states carry the real-time clock mid-transaction and continue the same reads", async () => {
+  const rom = makeGBA({ signature: "SIIRTC_V" }), key = keyOf(rom);
+  const original = clockGame(rom);
+  startCommand(original, 0xa6);
+  const restored = clockGame(rom);
+  States.restore(restored, await States.decode(States.encode(States.capture(original, key))), key);
+  assert.deepEqual(stateOf(restored, key), stateOf(original, key));
+  assert.equal(readBits(restored, 8), readBits(original, 8));
+  assert.deepEqual(stateOf(restored, key), stateOf(original, key));
+});
+
+test("GBA states without a clock section reset the link of a clock cartridge", () => {
+  const rom = makeGBA({ signature: "SIIRTC_V" }), key = keyOf(rom);
+  const data = cloneState(States.capture(clockGame(rom), key));
+  delete data.rtc;
+  const game = clockGame(rom);
+  startCommand(game, 0xa6);
+  assert.notEqual(game.cartridge.rtc.phase, "idle");
+  States.restore(game, data, key);
+  assert.equal(game.cartridge.rtc.phase, "idle");
+});
+
+test("GBA states refuse a clock section that does not fit the cartridge, leaving the machine untouched", () => {
+  const clockRom = makeGBA({ signature: "SIIRTC_V" }), key = keyOf(clockRom);
+  const plainRom = makeGBA({ signature: "SRAM_V110" });
+  const data = States.capture(clockGame(clockRom), key);
+  const plain = new GameBoyAdvance(plainRom);
+  const before = stateOf(plain, key);
+  assert.throws(() => States.restore(plain, cloneState(data), key), /horloge/i);
+  assert.deepEqual(stateOf(plain, key), before);
+
+  const game = clockGame(clockRom);
+  startCommand(game, 0xa6);
+  const beforeClock = stateOf(game, key);
+  const cases = [
+    (d) => { d.rtc.phase = "sleep"; },
+    (d) => { d.rtc.value = 999; },
+    (d) => { d.rtc.bytes = [1, 2, 3, 4, 5, 6, 7, 8]; },
+  ];
+  for (const mutate of cases) {
+    const bad = cloneState(States.capture(clockGame(clockRom), key));
+    mutate(bad);
+    assert.throws(() => States.restore(game, bad, key), Error);
+    assert.deepEqual(stateOf(game, key), beforeClock);
+  }
+});

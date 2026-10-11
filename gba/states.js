@@ -11,9 +11,18 @@
   const TYPED = new Map([Uint8Array, Int8Array, Uint16Array, Int16Array, Uint32Array, Int32Array, Uint8ClampedArray]
     .map(Ctor => [Ctor.name, Ctor]));
   // Diagnostics and derived references stay out of the state; the ROM and the output buffers are rebuilt on load.
-  const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "graphics", "apu", "lastStop", "resets"]);
+  const MACHINE_EXCLUDE = new Set(["cartridge", "cpu", "graphics", "apu", "lastStop", "resets", "serialRemaining"]);
   const CPU_EXCLUDE = new Set(["bus", "shiftCarry"]);
-  const CARTRIDGE_EXCLUDE = new Set(["rom", "title", "saveRevision"]);
+  const CARTRIDGE_EXCLUDE = new Set(["rom", "title", "saveRevision", "rtc"]);
+  const RTC_EXCLUDE = new Set(["clock", "onChange"]);
+  const RTC_PHASES = ["idle", "command", "read", "write"];
+  // Longest serial transfer is about 28k cycles; a full second is a generous bound for a valid state.
+  const SERIAL_MAX_CYCLES = 0x1000000;
+  const RTC_RANGES = {
+    offset: [-Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER], status: [0, 255], portControl: [0, 1],
+    direction: [0, 15], latch: [0, 15], sck: [0, 1], cs: [0, 1], sioOut: [0, 1], bits: [0, 8], value: [0, 255],
+    index: [0, 7], length: [0, 7], target: [0, 7],
+  };
   const GRAPHICS_EXCLUDE = new Set(["game"]);
   const APU_EXCLUDE = new Set(["_sampleRate", "psg", "samples"]);
   const PSG_EXCLUDE = new Set(["sampleRate", "samples"]);
@@ -147,6 +156,8 @@
       machine: encodeFields(game, MACHINE_EXCLUDE),
       cpu: encodeFields(game.cpu, CPU_EXCLUDE),
       cartridge: encodeFields(game.cartridge, CARTRIDGE_EXCLUDE),
+      rtc: game.cartridge.rtc ? encodeFields(game.cartridge.rtc, RTC_EXCLUDE) : null,
+      serial: { remaining: game.serialRemaining },
       graphics: encodeFields(game.graphics, GRAPHICS_EXCLUDE),
       apu: encodeFields(game.apu, APU_EXCLUDE),
       psg: encodeFields(game.apu.psg, PSG_EXCLUDE),
@@ -161,23 +172,48 @@
       machine: decodeFields(data.machine), cpu: decodeFields(data.cpu), cartridge: decodeFields(data.cartridge),
       graphics: decodeFields(data.graphics), apu: decodeFields(data.apu), psg: decodeFields(data.psg),
     };
+    // States written before the clock existed have no rtc section; the clock then keeps its current offset.
+    const rtc = game.cartridge.rtc;
+    sections.rtc = data.rtc === undefined || data.rtc === null ? null : decodeFields(data.rtc);
+    check(rtc !== null || sections.rtc === null, "Cet etat contient une horloge absente de cette cartouche.");
 
     // Validate every section against the freshly built game before the running machine is touched.
     matchFields(game, sections.machine, MACHINE_EXCLUDE);
     for (const key of IDENTITY) check(sections.machine[key] === game[key], "Cet etat appartient a une autre machine.");
     for (const [key, [min, max]] of Object.entries(MACHINE_RANGES)) integer(sections.machine[key], min, max);
+    // States written before the serial port existed have no serial section; no transfer was then in progress.
+    const serial = data.serial ?? null;
+    if (serial !== null) {
+      check(plainObject(serial) && Object.keys(serial).join() === "remaining", "Liaison serie invalide dans l'etat.");
+      integer(serial.remaining, 0, SERIAL_MAX_CYCLES);
+      check(serial.remaining === 0 || (sections.machine.io[0x128] & 0x80) !== 0, "Liaison serie invalide dans l'etat.");
+    }
     matchFields(game.cpu, sections.cpu, CPU_EXCLUDE);
     matchFields(game.cartridge, sections.cartridge, CARTRIDGE_EXCLUDE, { ram: game.cartridge.ramSizes });
     check(sections.cartridge.kind === game.cartridge.kind && sections.cartridge.type === game.cartridge.type,
       "Cet etat appartient a une autre cartouche.");
+    if (rtc && sections.rtc) {
+      // The transfer buffer may hold a different number of bytes than the saved one, so only its length is free.
+      matchFields({ ...rtc, bytes: [] }, sections.rtc, RTC_EXCLUDE);
+      check(RTC_PHASES.includes(sections.rtc.phase), "Horloge GBA invalide dans l'etat.");
+      for (const [key, [min, max]] of Object.entries(RTC_RANGES)) integer(sections.rtc[key], min, max);
+      check(sections.rtc.bytes.length <= 7 && sections.rtc.bytes.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255),
+        "Horloge GBA invalide dans l'etat.");
+    }
     matchFields(game.graphics, sections.graphics, GRAPHICS_EXCLUDE);
     matchFields(game.apu, sections.apu, APU_EXCLUDE);
     matchFields(game.apu.psg, sections.psg, PSG_EXCLUDE);
     integer(sections.psg.frameStep, 0, 7);
 
     applyFields(game, sections.machine);
+    if (serial) game.serialRemaining = serial.remaining;
+    else { game.serialRemaining = 0; game.io[0x128] &= ~0x80; }
     applyFields(game.cpu, sections.cpu);
     applyFields(game.cartridge, sections.cartridge);
+    if (rtc) {
+      if (sections.rtc) applyFields(rtc, sections.rtc);
+      else rtc.resetLink();
+    }
     applyFields(game.graphics, sections.graphics);
     applyFields(game.apu, sections.apu);
     applyFields(game.apu.psg, sections.psg);
