@@ -20,6 +20,7 @@ Les changements notables de chaque version sont consignés ici.
 
 ### Corrigé
 
+- GBA : un DMA répété (sauf mode immédiat) recharge désormais son nombre d'unités depuis le registre `DMAxCNT_L` à chaque déclenchement, comme GBATEK le décrit. Avant, la valeur figée à l'activation était réutilisée, donc une modification du compteur pendant le DMA était ignorée. Le test de priorité confirme que, à déclenchement égal, le DMA le plus bas s'exécute en premier.
 - GBA : le son Direct Sound manquait dans Super Mario Advance. Une demande de remplissage de FIFO faite pendant que le DMA son était désarmé restait bloquée et n'était jamais renouvelée. Chaque dépassement de minuteur demande désormais le remplissage tant que la FIFO contient 16 octets ou moins.
 - GBA : le Direct Sound était envoyé du mauvais côté. Les bits de routage gauche et droite de SOUNDCNT_H et le volume gauche de SOUNDCNT_L étaient inversés.
 - GBA : le canal ondes du PSG continuait de sonner après l'arrêt de son compteur ou la coupure de son DAC (NR30). Il est désormais silencieux dans ces cas.

@@ -100,6 +100,30 @@ test("DMA immediate and repeated HBlank transfers use count, destination reload 
   g.tick(1232); assert.equal(g.read16(0x03000010), 0x9876);
 });
 
+test("repeated DMA reloads its word count from the register at each start", () => {
+  const g = game();
+  g.write16(0x02000000, 0x1111); g.write16(0x02000002, 0x2222); g.write16(0x02000004, 0x3333); g.write16(0x02000006, 0x4444);
+  g.write32(0x040000b0, 0x02000000); g.write32(0x040000b4, 0x03000000);
+  g.write16(0x040000b8, 2); g.write16(0x040000ba, 0xa260);
+  g.triggerDMA(2);
+  assert.equal(g.read16(0x03000000), 0x1111); assert.equal(g.read16(0x03000002), 0x2222);
+  g.write16(0x040000b8, 1);
+  g.triggerDMA(2);
+  assert.equal(g.read16(0x03000000), 0x3333); assert.equal(g.read16(0x03000002), 0x2222);
+  assert.ok(g.io16(0xba) & 0x8000);
+});
+
+test("DMA with the same timing runs lower channels first, so the highest channel writes last", () => {
+  const g = game();
+  g.write16(0x02000000, 0xaaaa); g.write16(0x02000010, 0xbbbb);
+  g.write32(0x040000b0, 0x02000000); g.write32(0x040000b4, 0x03000000);
+  g.write16(0x040000b8, 1); g.write16(0x040000ba, 0xa200);
+  g.write32(0x040000bc, 0x02000010); g.write32(0x040000c0, 0x03000000);
+  g.write16(0x040000c4, 1); g.write16(0x040000c6, 0xa200);
+  g.triggerDMA(2);
+  assert.equal(g.read16(0x03000000), 0xbbbb);
+});
+
 test("HBlank affine DMA updates the following scanline, not the line already rendered", () => {
   const g = game();
   g.write16(0x04000000, 0x402); g.write16(0x0400000c, 0x100);

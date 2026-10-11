@@ -205,13 +205,16 @@
           const dma = this.dma[i];
           dma.source = this.io32(base) & (i === 0 ? 0x07ffffff : 0x0fffffff);
           dma.initialDestination = dma.destination = this.io32(base + 4) & (i === 3 ? 0x0fffffff : 0x07ffffff);
-          dma.count = this.io16(base + 8) & (i === 3 ? 65535 : 16383);
-          if (!dma.count) dma.count = i === 3 ? 65536 : 16384;
+          dma.count = this.dmaWordCount(i);
           const timing = value >>> 4 & 3;
           if (timing === 0) this.transfer(i);
         }
       }
       if (offset === 0x132 || offset === 0x133) this.checkKeys();
+    }
+    dmaWordCount(index) {
+      const count = this.io16(0xb0 + index * 12 + 8) & (index === 3 ? 65535 : 16383);
+      return count || (index === 3 ? 65536 : 16384);
     }
     // Without a cable the SI line reads high and no other unit answers, so transfers only time out and report that.
     // On a cable, the parent starts the transfer and children stay busy until it completes.
@@ -256,6 +259,7 @@
     transfer(index) {
       const base = 0xb0 + index * 12, control = this.io16(base + 10), dma = this.dma[index];
       if (!(control & 0x8000) || this.dmaBusy) return;
+      if (!dma.count) dma.count = this.dmaWordCount(index);
       // Special timing is the sound FIFO on DMA1/DMA2 only; DMA3 capture runs once per scanline.
       const sound = (control >>> 12 & 3) === 3 && (index === 1 || index === 2);
       if (sound && ![0x040000a0, 0x040000a4].includes(dma.destination)) {
@@ -287,7 +291,10 @@
       this.dmaStall += count * 2;
       if (control & 0x4000) this.interrupt(1 << (8 + index));
       if (!sound && (!(control & 512) || !(control & 0x3000))) this.setIO16(base + 10, control & ~0x8000);
-      else if (dstMode === 3) dma.destination = dma.initialDestination;
+      else {
+        if (dstMode === 3) dma.destination = dma.initialDestination;
+        dma.count = 0;
+      }
     }
     triggerDMA(timing) {
       for (let i = 0; i < 4; i++) if ((this.io16(0xba + i * 12) >>> 12 & 3) === timing) this.transfer(i);
