@@ -22,7 +22,8 @@
     const fits = (offset, size) => offset >= 0 && offset + size <= bytes.length;
     let end = -1;
     for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
-      if (view.getUint32(i, true) === 0x06054b50 && i + 22 + view.getUint16(i + 20, true) === bytes.length) {
+      // Bytes after the comment are ignored: some tools append a marker without updating the comment length.
+      if (view.getUint32(i, true) === 0x06054b50 && i + 22 + view.getUint16(i + 20, true) <= bytes.length) {
         end = i; break;
       }
     }

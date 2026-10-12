@@ -2,7 +2,7 @@
 
 Émulateurs web expérimentaux pour Game Boy, Game Boy Color et Game Boy Advance, avec des cœurs écrits en JavaScript dans ce projet. L'application fonctionne sans bibliothèque d'émulation, sans compte et sans service distant.
 
-**Version affichée : 0.11.0** — pré-version expérimentale.
+**Version affichée : 0.12.0** — pré-version expérimentale.
 
 ## Fonctionnalités
 

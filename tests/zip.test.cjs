@@ -38,6 +38,17 @@ test("empty, truncated, malformed and oversized archives fail", () => {
   assert.throws(() => listROMs(bytes), /Repertoire ZIP/);
 });
 
+test("bytes after the end record are ignored, but a comment longer than the file is rejected", async () => {
+  const rom = makeROM();
+  const archiveBytes = makeZIP([{ name: "a.gb", data: rom }], { method: 8 });
+  const withMarker = Buffer.concat([archiveBytes, Buffer.from("TORRENTZIPPED-EDFE10B7")]);
+  const archive = listROMs(withMarker);
+  assert.deepEqual(await extractROM(archive, archive.entries[0]), rom);
+  const badComment = new Uint8Array(archiveBytes);
+  new DataView(badComment.buffer).setUint16(badComment.length - 2, 5, true);
+  assert.throws(() => listROMs(badComment), /invalide/);
+});
+
 test("CRC, metadata, encryption and compression errors are explicit", async () => {
   const bytes = makeZIP([{ name: "a.gb", data: makeROM() }]);
   bytes[34] ^= 1;

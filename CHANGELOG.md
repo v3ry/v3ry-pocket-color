@@ -4,6 +4,8 @@ Les changements notables de chaque version sont consignés ici.
 
 ## [Non publié]
 
+## [0.12.0] - 2026-10-12
+
 ### Ajouté
 
 - Scènes 2.5D et 3D pour Pokémon Jaune. Le moteur Gen 1 est partagé avec Pokémon Rouge (`gbc/preset/gen1-engine.js`) ; Jaune ne diffère que par les adresses WRAM (carte, bloc, banque, combat) et par le nom affiché. Les décors et les intérieurs de Bourg Palette, Route 1 et des maisons reprennent ceux de Rouge : leur fidélité à Jaune n'est pas vérifiée. Le rendu 3D reste en repli 2D sur les écrans de titre, de combat et de transition.
@@ -28,6 +30,7 @@ Les changements notables de chaque version sont consignés ici.
 - GBA : le son Direct Sound manquait dans Super Mario Advance. Une demande de remplissage de FIFO faite pendant que le DMA son était désarmé restait bloquée et n'était jamais renouvelée. Chaque dépassement de minuteur demande désormais le remplissage tant que la FIFO contient 16 octets ou moins.
 - GBA : le Direct Sound était envoyé du mauvais côté. Les bits de routage gauche et droite de SOUNDCNT_H et le volume gauche de SOUNDCNT_L étaient inversés.
 - GBA : le canal ondes du PSG continuait de sonner après l'arrêt de son compteur ou la coupure de son DAC (NR30). Il est désormais silencieux dans ces cas.
+- ZIP : un fichier ZIP suivi d'octets après la fin de son répertoire était rejeté comme invalide. Ces octets sont désormais ignorés ; les CRC et les tailles restent vérifiés.
 - GBA : la coupure du son (SOUNDCNT_X bit 7) effaçait SOUNDCNT_H, alors que le matériel le conserve. SOUNDCNT_L est toujours remis à zéro, et sa lecture ne renvoie plus une valeur périmée.
 - GBA : en mode bitmap 4, l'index de couleur 0 était opaque. Il est désormais transparent, comme en mode tuile : un sprite de priorité supérieure ne reste plus masqué.
 - GBA : les canaux PSG étaient environ 4,6 fois plus forts que le Direct Sound par rapport au matériel. Un canal au maximum vaut désormais un quart de la pleine échelle Direct Sound, comme dans GBATEK. Les jeux qui jouent surtout avec le PSG sonnent donc nettement plus bas qu'avant.
