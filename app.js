@@ -49,6 +49,8 @@ let graphicsGame = null;
 let graphicsFailed = false;
 const sceneCanvas = document.querySelector("#scene-canvas");
 const sceneResolution = document.querySelector("#scene-resolution");
+const sceneFilter = document.querySelector("#scene-filter");
+let scene2DFilter = null;
 const sceneCanvasBaseWidth = sceneCanvas.width || 640;
 const sceneCanvasBaseHeight = sceneCanvas.height || 576;
 const sceneStatus = document.querySelector("#scene-status");
@@ -542,7 +544,8 @@ function sceneMessage(message, error = false) {
   if (error) showFullscreenMessage(message, true);
 }
 function shaderLabel() {
-  return { light: "Lissage léger", soft: "Arrondi des sprites", sharp: "Netteté", crt: "CRT rétro" }[document.querySelector("#scene-filter").value];
+  return { light: "Lissage léger", soft: "Arrondi des sprites", sharp: "Netteté", crt: "CRT rétro",
+    scale2x: "Scale2x pixel art", scale4x: "Scale4x pixel art" }[sceneFilter.value];
 }
 function cameraControls() {
   for (const key of ["yaw", "pitch", "zoom", "thickness", "light"]) {
@@ -561,6 +564,11 @@ function resetSceneCamera() {
 function returnTo2D(message, error = false) {
   if (!isGBA()) emulator?.setVideoCapture(false);
   renderMode.value = "2d";
+  if (scene2DFilter) {
+    sceneFilter.value = scene2DFilter;
+    scene2DFilter = null;
+  }
+  document.querySelector("#scene-filter-scale4x").disabled = isGBA();
   sceneResolution.disabled = isGBA();
   document.querySelector("#scene-smoothing").disabled = isGBA();
   if (sceneCanvas.width !== sceneCanvasBaseWidth) sceneCanvas.width = sceneCanvasBaseWidth;
@@ -594,6 +602,7 @@ function updateScene(force = false) {
   if (sceneCanvas.height !== outputHeight) sceneCanvas.height = outputHeight;
   sceneCanvas.classList.toggle("is-super-resolution", superResolution2D);
   sceneResolution.disabled = renderMode.value !== "2d";
+  document.querySelector("#scene-filter-scale4x").disabled = renderMode.value !== "2d";
   document.querySelector("#scene-smoothing").disabled = superResolution2D;
   if (superResolution2D) document.querySelector("#scene-smoothing").checked = true;
   if (sceneGame !== emulator) {
@@ -623,11 +632,12 @@ function updateScene(force = false) {
     }
     try {
       if (!sceneRenderer) sceneRenderer = new PocketScene.Renderer(sceneCanvas);
-      sceneRenderer.render2D(emulator, document.querySelector("#scene-filter").value);
+      sceneRenderer.render2D(emulator, sceneFilter.value);
       sceneCanvas.hidden = false;
       sceneCanvas.setAttribute("aria-hidden", "false");
       const resolution = superResolution2D ? ` · sur-résolution ×${outputScale} (${outputWidth} × ${outputHeight})` : "";
-      sceneMessage(`2D · shader ${shaderLabel()}${resolution} · image entière filtrée, textes inclus · jeu et sauvegardes inchangés.`);
+      const filterType = sceneFilter.value === "scale4x" ? "filtre" : "shader";
+      sceneMessage(`2D · ${filterType} ${shaderLabel()}${resolution} · image entière filtrée, textes inclus · jeu et sauvegardes inchangés.`);
     } catch (error) {
       if (sceneRenderer) { sceneRenderer.dispose(); sceneRenderer = null; }
       document.querySelector("#scene-smoothing").checked = false;
@@ -669,6 +679,11 @@ sceneResolution.value = "1";
 document.querySelector("#scene-smoothing").checked = false;
 document.querySelector("#scene-filter").value = "light";
 document.querySelector("#scene-filter").addEventListener("change", () => {
+  if (renderMode.value === "2d") scene2DFilter = sceneFilter.value;
+  else {
+    scene2DFilter = null;
+    if (sceneFilter.value === "scale4x") sceneFilter.value = "scale2x";
+  }
   document.querySelector("#scene-smoothing").checked = true;
   updateScene(true);
   canvas.focus();
@@ -690,6 +705,15 @@ renderMode.addEventListener("change", () => {
   if (!["2d", "2.5d", "3d"].includes(renderMode.value)) {
     returnTo2D("Mode de rendu invalide. Retour au rendu 2D.", true);
     return;
+  }
+  if (renderMode.value === "2d") {
+    if (scene2DFilter) {
+      sceneFilter.value = scene2DFilter;
+      scene2DFilter = null;
+    }
+  } else if (sceneFilter.value === "scale4x") {
+    scene2DFilter = "scale4x";
+    sceneFilter.value = "scale2x";
   }
   if (renderMode.value === "2d") {
     returnTo2D("Rendu 2D original rétabli, sans redémarrage de la partie.");

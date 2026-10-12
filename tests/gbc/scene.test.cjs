@@ -13,6 +13,30 @@ const World = require("../../gbc/world.js");
 const camera = { ...preset.camera, thickness: preset.thickness, light: 0.75 };
 const pixel = (image, x, y) => [...image.pixels.slice((y * image.width + x) * 4, (y * image.width + x) * 4 + 4)];
 
+test("Scale2x and Scale4x preserve palette colors and apply the classic neighbor rules", () => {
+  const source = { width: 3, height: 3, pixels: new Uint8ClampedArray(3 * 3 * 4) };
+  for (let i = 0; i < 9; i++) source.pixels.set([0, 0, 0, 255], i * 4);
+  const put = (x, y, color) => source.pixels.set([...color, 255], (y * source.width + x) * 4);
+  const green = [0, 255, 0, 255], blue = [0, 0, 255, 255], red = [255, 0, 0, 255];
+  put(1, 0, green); put(0, 1, green); put(1, 1, blue); put(2, 1, red); put(1, 2, red);
+
+  const doubled = Scene.scale2xImage(source);
+  assert.equal(doubled.width, 6);
+  assert.equal(doubled.height, 6);
+  assert.deepEqual(pixel(doubled, 2, 2), green);
+  assert.deepEqual(pixel(doubled, 3, 2), blue);
+  assert.deepEqual(pixel(doubled, 2, 3), blue);
+  assert.deepEqual(pixel(doubled, 3, 3), red);
+
+  const middle = Scene.scale2xImage(source), expected = Scene.scale2xImage(middle);
+  const target = { width: 12, height: 12, pixels: new Uint8ClampedArray(12 * 12 * 4) };
+  assert.strictEqual(Scene.scale4xImage(source, middle, target), target);
+  assert.deepEqual(target.pixels, expected.pixels);
+  const palette = new Set(Array.from({ length: 9 }, (_, i) => source.pixels.slice(i * 4, i * 4 + 4).join(",")));
+  for (let i = 0; i < target.pixels.length; i += 4) assert.ok(palette.has(target.pixels.slice(i, i + 4).join(",")));
+  assert.throws(() => Scene.scale2xImage({ width: 1, height: 1, pixels: [] }), /source Scale2x invalide/);
+});
+
 test("preset matching uses cartridge header identity rather than the ROM filename", () => {
   const game = new GameBoy(makeROM({ color: true, type: 0x19 }));
   assert.equal(Scene.selectPreset(game, [preset]), null);
@@ -765,10 +789,26 @@ test("2D shader supports 2x and 4x output while keeping filter steps tied to nat
   }
   renderer.dispose();
 });
+test("Scale4x renders a fourfold palette-preserving frame and reuses its CPU buffers", () => {
+  const gl = fakeGL(), renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
+  const game = new GameBoy(makeROM());
+  const result = renderer.render2D(game, "scale4x"), output = renderer.scale4xOutput;
+  assert.equal(result.detail, "2D · Scale4x pixel art");
+  assert.equal(renderer.smoothing, undefined);
+  assert.equal(output.width, 640);
+  assert.equal(output.height, 576);
+  assert.strictEqual(gl.calls.find(call => call.method === "texImage2D").args[8], output.pixels);
+  game.pixels[0] ^= 0xff;
+  gl.calls.length = 0;
+  renderer.render2D(game, "scale4x");
+  assert.strictEqual(renderer.scale4xOutput, output);
+  assert.strictEqual(gl.calls.find(call => call.method === "texImage2D").args[8], output.pixels);
+  renderer.dispose();
+});
 test("shader choices reuse a single GPU program and supply source-pixel steps only in 2D", () => {
   const gl = fakeGL(), renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
   const game = new GameBoy(makeROM());
-  for (const [i, filter] of ["light", "soft", "sharp", "crt"].entries()) {
+  for (const [i, filter] of ["light", "soft", "sharp", "crt", "scale2x"].entries()) {
     gl.calls.length = 0;
     renderer.render2D(game, filter);
     assert.deepEqual(gl.calls.find(c => c.method === "uniform1f" && c.args[0] === "uFilter").args, ["uFilter", i]);
@@ -781,6 +821,12 @@ test("shader choices reuse a single GPU program and supply source-pixel steps on
   assert.deepEqual(gl.calls.find(c => c.method === "uniform2f" && c.args[0] === "uStep").args, ["uStep", 2 / 640, 2 / 576]);
   assert.throws(() => renderer.render2D(game, "invalid"), /shader invalide/);
   assert.throws(() => renderer.render(game, preset, camera, "2.5d", true, "invalid"), /shader invalide/);
+  const scaleGL = fakeGL(), scaleRenderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => scaleGL });
+  scaleRenderer.render2D(game, "scale2x");
+  const shader = scaleGL.calls.find(call => call.method === "shaderSource" && call.args[1].includes("uFilter"))?.args[1];
+  assert.match(shader, /same\(b, d\).*same\(b, f\).*same\(d, h\)/);
+  assert.match(shader, /same\(h, f\).*same\(d, h\).*same\(b, f\)/);
+  scaleRenderer.dispose();
   renderer.dispose();
   assert.equal(gl.deleted.length, 18);
 });

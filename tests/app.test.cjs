@@ -602,16 +602,22 @@ test("shader selector activates all filters in 2D and preserves the choice in pe
   await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
   h.evaluate("stopLoop(); paused = true; emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
   assert.equal(h.element("#scene-filter").value, "light");
-  for (const filter of ["light", "soft", "sharp", "crt"]) {
+  for (const filter of ["light", "soft", "sharp", "crt", "scale2x", "scale4x"]) {
     h.element("#scene-filter").value = filter; h.element("#scene-filter").fire("change");
     assert.equal(h.element("#scene-smoothing").checked, true);
     assert.equal(h.scope.sceneFilter, filter);
-    assert.match(h.element("#scene-status").textContent, /shader/);
+    assert.match(h.element("#scene-status").textContent, new RegExp(filter === "scale4x" ? "filtre" : "shader"));
   }
   h.element("#render-mode").value = "2.5d"; h.element("#render-mode").fire("change");
-  assert.equal(h.scope.sceneFilter, "crt");
+  assert.equal(h.scope.sceneFilter, "scale2x");
+  assert.match(h.element("#scene-status").textContent, /Scale2x pixel art/);
+  assert.equal(h.element("#scene-filter").value, "scale2x");
+  assert.equal(h.element("#scene-filter-scale4x").disabled, true);
   h.element("#scene-smoothing").checked = false; h.element("#scene-smoothing").fire("change");
   assert.equal(h.scope.sceneSmoothing, false);
+  h.element("#render-mode").value = "2d"; h.element("#render-mode").fire("change");
+  assert.equal(h.element("#scene-filter").value, "scale4x");
+  assert.equal(h.element("#scene-filter-scale4x").disabled, false);
 });
 test("2D super-resolution renders the requested output size and stays disabled in perspective and GBA modes", async () => {
   const h = harness();

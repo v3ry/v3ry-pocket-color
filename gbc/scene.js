@@ -3,6 +3,58 @@
   const Graphics = typeof module !== "undefined" && module.exports ? require("./graphics.js") : root.PocketGraphics;
   const World = typeof module !== "undefined" && module.exports ? require("./world.js") : root.PocketWorld;
 
+  function scale2xImage(source, target) {
+    const { width, height, pixels } = source || {};
+    if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1
+      || !(pixels instanceof Uint8Array || pixels instanceof Uint8ClampedArray)
+      || pixels.length !== width * height * 4) {
+      throw new Error("Image source Scale2x invalide.");
+    }
+    const outputWidth = width * 2, outputHeight = height * 2;
+    const output = target || { width: outputWidth, height: outputHeight,
+      pixels: new Uint8ClampedArray(outputWidth * outputHeight * 4) };
+    if (output.width !== outputWidth || output.height !== outputHeight
+      || !(output.pixels instanceof Uint8Array || output.pixels instanceof Uint8ClampedArray)
+      || output.pixels.length !== outputWidth * outputHeight * 4) {
+      throw new Error("Image cible Scale2x invalide.");
+    }
+    const sourceWords = pixels.byteOffset % 4 ? null
+      : new Uint32Array(pixels.buffer, pixels.byteOffset, pixels.length / 4);
+    const outputWords = output.pixels.byteOffset % 4 ? null
+      : new Uint32Array(output.pixels.buffer, output.pixels.byteOffset, output.pixels.length / 4);
+    const same = (a, b) => sourceWords ? sourceWords[a >>> 2] === sourceWords[b >>> 2]
+      : pixels[a] === pixels[b] && pixels[a + 1] === pixels[b + 1]
+        && pixels[a + 2] === pixels[b + 2] && pixels[a + 3] === pixels[b + 3];
+    const copy = (destination, color) => {
+      if (sourceWords && outputWords) {
+        outputWords[destination >>> 2] = sourceWords[color >>> 2];
+        return;
+      }
+      output.pixels[destination] = pixels[color];
+      output.pixels[destination + 1] = pixels[color + 1];
+      output.pixels[destination + 2] = pixels[color + 2];
+      output.pixels[destination + 3] = pixels[color + 3];
+    };
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const center = (y * width + x) * 4;
+      const top = y ? center - width * 4 : center, bottom = y + 1 < height ? center + width * 4 : center;
+      const left = x ? center - 4 : center, right = x + 1 < width ? center + 4 : center;
+      const topLeft = same(top, left) && !same(top, right) && !same(left, bottom) ? left : center;
+      const topRight = same(top, right) && !same(top, left) && !same(right, bottom) ? right : center;
+      const bottomLeft = same(left, bottom) && !same(left, top) && !same(bottom, right) ? left : center;
+      const bottomRight = same(bottom, right) && !same(left, bottom) && !same(top, right) ? right : center;
+      const outputTop = y * 2 * outputWidth + x * 2;
+      const outputBottom = outputTop + outputWidth;
+      copy(outputTop * 4, topLeft);
+      copy((outputTop + 1) * 4, topRight);
+      copy(outputBottom * 4, bottomLeft);
+      copy((outputBottom + 1) * 4, bottomRight);
+    }
+    return output;
+  }
+  function scale4xImage(source, middle, target) {
+    return scale2xImage(scale2xImage(source, middle), target);
+  }
   function selectPreset(game, presets) {
     return presets.find(preset => preset.match.title === game.cartridge.title
       && preset.match.color === game.color && preset.match.cartridgeType === game.cartridge.type
@@ -202,7 +254,7 @@
       gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 6);
     }
     smoothContours(filter = "light", native2D = false) {
-      if (!["light", "soft", "sharp", "crt"].includes(filter)) throw new Error("Filtre shader invalide.");
+      if (!["light", "soft", "sharp", "crt", "scale2x"].includes(filter)) throw new Error("Filtre shader invalide.");
       const gl = this.gl;
       if (!this.smoothing) {
         const vertex = this.shader(gl.VERTEX_SHADER, `
@@ -224,6 +276,23 @@
           bool same(vec3 a, vec3 b) { return all(lessThan(abs(a - b), vec3(0.002))); }
           void main() {
             vec3 center = texture2D(uTexture, vUV).rgb;
+            if (uFilter > 3.5) {
+              vec2 cell = (floor(vUV / uStep) + 0.5) * uStep;
+              vec2 subpixel = fract(vUV / uStep);
+              vec3 b = texture2D(uTexture, cell + vec2(0.0, uStep.y)).rgb;
+              vec3 d = texture2D(uTexture, cell - vec2(uStep.x, 0.0)).rgb;
+              vec3 f = texture2D(uTexture, cell + vec2(uStep.x, 0.0)).rgb;
+              vec3 h = texture2D(uTexture, cell - vec2(0.0, uStep.y)).rgb;
+              vec3 outputColor = center;
+              bool upper = subpixel.y >= 0.5;
+              bool left = subpixel.x < 0.5;
+              if (upper && left && same(b, d) && !same(b, f) && !same(d, h)) outputColor = d;
+              else if (upper && !left && same(b, f) && !same(b, d) && !same(f, h)) outputColor = f;
+              else if (!upper && left && same(d, h) && !same(d, b) && !same(h, f)) outputColor = d;
+              else if (!upper && !left && same(h, f) && !same(d, h) && !same(b, f)) outputColor = f;
+              gl_FragColor = vec4(outputColor, 1.0);
+              return;
+            }
             if (uFilter > 0.5 && uFilter < 1.5) {
               vec2 cell = (floor(vUV / uStep) + 0.5) * uStep;
               vec2 side = step(vec2(0.5), fract(vUV / uStep)) * 2.0 - 1.0;
@@ -310,7 +379,7 @@
       gl.disable(gl.DEPTH_TEST);
       gl.useProgram(effect.program);
       gl.uniform1i(effect.sampler, 0); gl.uniform2f(effect.pixel, 1 / width, 1 / height);
-      gl.uniform1f(effect.filter, ["light", "soft", "sharp", "crt"].indexOf(filter));
+      gl.uniform1f(effect.filter, ["light", "soft", "sharp", "crt", "scale2x"].indexOf(filter));
       gl.uniform2f(effect.step, native2D ? 1 / 160 : 2 / width, native2D ? 1 / 144 : 2 / height);
       for (const location of Object.values(this.attributes)) gl.disableVertexAttribArray(location);
       gl.bindBuffer(gl.ARRAY_BUFFER, effect.buffer);
@@ -322,7 +391,7 @@
       gl.useProgram(this.program);
     }
     render2D(game, filter = "light") {
-      if (!["light", "soft", "sharp", "crt"].includes(filter)) throw new Error("Filtre shader invalide.");
+      if (!["light", "soft", "sharp", "crt", "scale2x", "scale4x"].includes(filter)) throw new Error("Filtre shader invalide.");
       const gl = this.gl;
       if (gl.isContextLost()) throw new Error("Contexte WebGL perdu.");
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -330,16 +399,29 @@
       gl.useProgram(this.program); gl.activeTexture(gl.TEXTURE0);
       gl.uniform1i(this.uniforms.uTexture, 0);
       gl.uniform1f(this.uniforms.uHUD, 1); gl.uniform1f(this.uniforms.uLight, 0);
-      this.draw(this.hud, 4, { width: 160, height: 144, pixels: game.pixels });
-      this.smoothContours(filter, true);
+      if (filter === "scale4x") {
+        if (!this.scale4xSource) this.scale4xSource = { width: 160, height: 144, pixels: game.pixels };
+        this.scale4xSource.pixels = game.pixels;
+        if (!this.scale4xMiddle) this.scale4xMiddle = {
+          width: 320, height: 288, pixels: new Uint8ClampedArray(320 * 288 * 4),
+        };
+        if (!this.scale4xOutput) this.scale4xOutput = {
+          width: 640, height: 576, pixels: new Uint8ClampedArray(640 * 576 * 4),
+        };
+        const output = scale4xImage(this.scale4xSource, this.scale4xMiddle, this.scale4xOutput);
+        this.draw(this.hud, 4, { width: output.width, height: output.height, pixels: output.pixels });
+      } else {
+        this.draw(this.hud, 4, { width: 160, height: 144, pixels: game.pixels });
+        this.smoothContours(filter, true);
+      }
       const error = gl.getError();
       if (error !== gl.NO_ERROR) throw new Error(`Erreur WebGL : ${error}.`);
-      return { smoothed: true, detail: "2D · contours lissés" };
+      return { smoothed: true, detail: filter === "scale4x" ? "2D · Scale4x pixel art" : "2D · contours lissés" };
     }
     render(game, preset, camera, mode = "2.5d", smoothing = false, filter = "light") {
       validateCamera(camera);
       if (typeof smoothing !== "boolean") throw new Error("Réglage de lissage invalide.");
-      if (!["light", "soft", "sharp", "crt"].includes(filter)) throw new Error("Filtre shader invalide.");
+      if (!["light", "soft", "sharp", "crt", "scale2x"].includes(filter)) throw new Error("Filtre shader invalide.");
       const gl = this.gl;
       if (gl.isContextLost()) throw new Error("Contexte WebGL perdu. Revenez en 2D puis réessayez.");
       const world = mode === "3d" ? World.build(game, preset, camera.thickness) : null;
@@ -390,9 +472,10 @@
       this.uploadedVertices?.clear();
       this.uploadedTextures?.clear();
       this.smoothing = null;
+      this.scale4xSource = this.scale4xMiddle = this.scale4xOutput = null;
     }
   }
-  const api = { selectPreset, validateCamera, buildScene, Renderer };
+  const api = { selectPreset, validateCamera, buildScene, scale2xImage, scale4xImage, Renderer };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.PocketScene = api;
 })(globalThis);
