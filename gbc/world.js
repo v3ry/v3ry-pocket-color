@@ -148,28 +148,52 @@
     if (world.battle) return buildBattle(game, world, thickness);
     const textures = Graphics.scene(game), models = [], background = [], sprites = [], shadows = [];
     if (world.screenMap) Graphics.mapWindow(game, textures);
-    const tileData = world.tiles ? [...new Set([...world.tiles].map(code => code & 255))].map(tile => {
-      const offset = (tile & 128 ? 8192 : 0) + 0x1000 + (tile & 127) * 16;
-      return [tile, ...game.vram.subarray(offset, offset + 16)];
-    }) : null;
+    const unsignedTiles = world.unsignedTiles ?? !!(game.io[0x40] & 16);
+    const tileData = world.tiles ? world.wideTiles
+      ? [...new Set([...world.tiles].map(code => (code & 255) | ((code >> 3) & 256)))].map(pattern => {
+        const tile = pattern & 255, bank = pattern & 256 ? 8192 : 0;
+        const offset = bank + (unsignedTiles ? tile * 16 : 0x1000 + ((tile << 24) >> 24) * 16);
+        return [pattern, ...game.vram.subarray(offset, offset + 16)];
+      })
+      : [...new Set([...world.tiles].map(code => code & 255))].map(tile => {
+        const offset = (tile & 128 ? 8192 : 0) + 0x1000 + (tile & 127) * 16;
+        return [tile, ...game.vram.subarray(offset, offset + 16)];
+      }) : null;
     const sceneKey = [preset.id, thickness, world.width, world.height, world.ground, world.objects,
-      world.surfaces, world.facades, world.tiles ? [...world.tiles] : null, world.monochrome, world.procedural, world.generic];
+      world.surfaces, world.facades, world.tiles ? [...world.tiles] : null, world.monochrome,
+      world.procedural, world.generic, world.wideTiles === true, world.luminanceRelief === true,
+      world.canopyRelief === true, world.vegetationRelief === true, world.modeledFoliage === true,
+      world.foundationDepth ?? 0];
     const key = JSON.stringify([...sceneKey, tileData, world.tiles ? [...game.bgPalette] : null,
       world.tiles ? game.io[0x47] : null]);
-    const sculptedTiles = new Set();
-    if (world.procedural) for (const surface of world.surfaces) if (surface.sculpted) {
-      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
-        sculptedTiles.add(world.tiles[((surface.y >> 3) + dy) * world.tileColumns + (surface.x >> 3) + dx] & 255);
-      }
-    }
-    const geometryKey = world.procedural ? JSON.stringify([...sceneKey, tileData.filter(([tile]) => sculptedTiles.has(tile))]) : key;
     const cached = geometryCache.get(game);
-    const reusable = cached?.geometryKey === geometryKey;
     const scale = thickness / 14, stats = { trees: 0, houses: 0, signs: 0, characters: 0 };
     const width = world.width * 32, height = world.height * 32;
     const ground = cached?.key === key ? cached.ground : world.tiles ? Graphics.tileGrid(game, world.tiles,
-      world.tileColumns || 24, world.tileRows || 20)
+      world.tileColumns || 24, world.tileRows || 20, world.wideTiles === true, unsignedTiles)
       : { width, height, pixels: new Uint8ClampedArray(width * height * 4) };
+    const isVegetationPixel = index => {
+      const offset = index * 4, r = ground.pixels[offset], g = ground.pixels[offset + 1], b = ground.pixels[offset + 2];
+      return g >= 72 && g - r >= 24 && g - b >= 14;
+    };
+    let vegetationSignature = null;
+    if (world.vegetationRelief) {
+      let hash = 2166136261;
+      for (let i = 0; i < width * height; i++) if (isVegetationPixel(i)) hash = Math.imul(hash ^ i, 16777619);
+      vegetationSignature = hash >>> 0;
+    }
+    const sculptedTiles = new Set();
+    if (world.procedural) for (const surface of world.surfaces) if (surface.sculpted) {
+      const size = surface.size ?? 16;
+      for (let dy = 0; dy < size; dy += 8) for (let dx = 0; dx < size; dx += 8) {
+        const code = world.tiles[((surface.y + dy) >> 3) * world.tileColumns + ((surface.x + dx) >> 3)];
+        sculptedTiles.add(world.wideTiles ? (code & 255) | ((code >> 3) & 256) : code & 255);
+      }
+    }
+    const geometryKey = world.procedural ? JSON.stringify([...sceneKey,
+      tileData.filter(([tile]) => sculptedTiles.has(tile)),
+      world.luminanceRelief ? [...game.bgPalette] : null, vegetationSignature]) : key;
+    const reusable = cached?.geometryKey === geometryKey;
     const groundColors = [[162, 193, 106], [221, 205, 155], [89, 160, 190], [195, 187, 120]];
     function pixel(x, y, kind) {
       const color = groundColors[kind];
@@ -319,14 +343,175 @@
     }
     function relief() {
       const heights = new Int8Array(width * height).fill(-128), used = new Uint8Array(heights.length);
-      for (const { x, y, depth, sculpted, slope } of world.surfaces) {
-        for (let dy = 0; dy < 16; dy++) for (let dx = 0; dx < 16; dx++) {
-          const px = x + dx, py = y + dy, tile = world.tiles[(py >> 3) * world.tileColumns + (px >> 3)];
+      const collisionMask = new Uint8Array(heights.length);
+      for (const { x, y, sculpted, size = 16 } of world.surfaces) if (sculpted) {
+        for (let dy = 0; dy < size; dy++) collisionMask.fill(1, (y + dy) * width + x, (y + dy) * width + x + size);
+      }
+      const foliageMask = new Uint8Array(heights.length);
+      if (world.modeledFoliage && scale > 0) {
+        const visited = new Uint8Array(heights.length), queue = new Int32Array(heights.length);
+        const texel = index => Array.from({ length: 4 }, () => [
+          ((index % width) + 0.5) / width, (Math.floor(index / width) + 0.5) / height]);
+        const coloredFace = (points, index, shade = 1) => quad(models,
+          points.map(([x, y, z]) => [x, y, z * scale]), texel(index), shade);
+        const treeMask = new Uint8Array(heights.length);
+        for (let start = 0; start < heights.length; start++) {
+          if (visited[start] || !collisionMask[start] || !isVegetationPixel(start)) continue;
+          let head = 0, tail = 1, left = width, right = 0, top = height, bottom = 0;
+          queue[0] = start; visited[start] = 1;
+          while (head < tail) {
+            const index = queue[head++], x = index % width, y = Math.floor(index / width);
+            left = Math.min(left, x); right = Math.max(right, x);
+            top = Math.min(top, y); bottom = Math.max(bottom, y);
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx, ny = y + dy, next = ny * width + nx;
+              if (nx < 0 || ny < 0 || nx >= width || ny >= height || visited[next]
+                || !collisionMask[next] || !isVegetationPixel(next)) continue;
+              visited[next] = 1; queue[tail++] = next;
+            }
+          }
+          const w = right - left + 1, d = bottom - top + 1;
+          // Dense rectangular green areas may be roofs, not tree crowns.
+          if (tail < 96 || w < 12 || d < 12 || w > 40 || d > 40 || tail > w * d * 0.88) continue;
+          const cx = (left + right + 1) / 2, cy = (top + bottom + 1) / 2;
+          const rx = w / 2, ry = d / 2, stature = 20 + Math.min(w, d) * 0.3;
+          let bark = start, barkScore = -Infinity;
+          for (let y = top; y < Math.min(height, bottom + 9); y++) for (let x = left; x <= right; x++) {
+            const index = y * width + x, offset = index * 4;
+            const r = ground.pixels[offset], g = ground.pixels[offset + 1], b = ground.pixels[offset + 2];
+            const score = r - g - b * 0.25;
+            if (score > barkScore) { bark = index; barkScore = score; }
+          }
+          for (let segment = 0; segment < 8; segment++) {
+            const a = segment * Math.PI / 4, b = (segment + 1) * Math.PI / 4;
+            coloredFace([[cx + Math.cos(a) * 2.5, cy + Math.sin(a) * 2.5, 0],
+              [cx + Math.cos(b) * 2.5, cy + Math.sin(b) * 2.5, 0],
+              [cx + Math.cos(b) * 2, cy + Math.sin(b) * 2, stature * 0.65],
+              [cx + Math.cos(a) * 2, cy + Math.sin(a) * 2, stature * 0.65]], bark, 0.85);
+          }
+          const point = (ring, segment) => {
+            const angle = segment * Math.PI / 4, latitude = ring * Math.PI / 5;
+            return [cx + Math.cos(angle) * Math.sin(latitude) * rx,
+              cy + Math.sin(angle) * Math.sin(latitude) * ry,
+              stature * (0.65 + Math.cos(latitude) * 0.35) * scale];
+          };
+          for (let ring = 0; ring < 5; ring++) for (let segment = 0; segment < 8; segment++) {
+            const points = [point(ring, segment), point(ring, segment + 1),
+              point(ring + 1, segment + 1), point(ring + 1, segment)];
+            quad(models, points, points.map(([x, y]) => [
+              Math.max(left + 0.5, Math.min(right + 0.5, x)) / width,
+              Math.max(top + 0.5, Math.min(bottom + 0.5, y)) / height]), 0.88 + (5 - ring) * 0.024);
+          }
+          for (let y = top; y <= bottom; y++) for (let x = left; x <= right; x++) {
+            const index = y * width + x;
+            foliageMask[index] = 1; treeMask[index] = 1;
+          }
+          stats.trees++;
+        }
+        stats.plants = 0;
+        for (let y = 0; y < height; y += 16) for (let x = 0; x < width; x += 16) {
+          const leaves = [];
+          let left = x + 16, right = x, top = y + 16, bottom = y;
+          for (let dy = 0; dy < 16; dy++) for (let dx = 0; dx < 16; dx++) {
+            const index = (y + dy) * width + x + dx;
+            if (treeMask[index] || !collisionMask[index] || !isVegetationPixel(index)) continue;
+            leaves.push(index);
+            left = Math.min(left, x + dx); right = Math.max(right, x + dx);
+            top = Math.min(top, y + dy); bottom = Math.max(bottom, y + dy);
+          }
+          if (leaves.length < 18 || leaves.length > 160) continue;
+          const cx = (left + right + 1) / 2, cy = (top + bottom + 1) / 2;
+          for (let leaf = 0; leaf < 6; leaf++) {
+            const angle = leaf * Math.PI / 3, dx = Math.cos(angle), dy = Math.sin(angle);
+            const color = leaves[Math.floor(leaf * leaves.length / 6)], spread = 5;
+            const root = [cx, cy, 1], tip = [cx + dx * spread, cy + dy * spread, 7 + leaf % 3];
+            const a = [cx + dx * 3 - dy * 2, cy + dy * 3 + dx * 2, 4];
+            const b = [cx + dx * 3 + dy * 2, cy + dy * 3 - dx * 2, 4];
+            const ridge = [cx + dx * 3, cy + dy * 3, 6];
+            coloredFace([root, a, tip, ridge], color);
+            coloredFace([root, ridge, tip, b], color, 0.84);
+          }
+          for (let dy = 0; dy < 16; dy++) foliageMask.fill(1, (y + dy) * width + x, (y + dy) * width + x + 16);
+          stats.plants++;
+        }
+      }
+      function distanceToEdge(mask) {
+        const distance = new Uint16Array(mask.length), far = width + height;
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+          const index = y * width + x;
+          if (mask[index]) distance[index] = x === 0 || y === 0 || x === width - 1 || y === height - 1 ? 1 : far;
+        }
+        for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+          const index = y * width + x;
+          if (!mask[index]) continue;
+          if (x) distance[index] = Math.min(distance[index], distance[index - 1] + 1);
+          if (y) distance[index] = Math.min(distance[index], distance[index - width] + 1);
+        }
+        for (let y = height - 1; y >= 0; y--) for (let x = width - 1; x >= 0; x--) {
+          const index = y * width + x;
+          if (!mask[index]) continue;
+          if (x + 1 < width) distance[index] = Math.min(distance[index], distance[index + 1] + 1);
+          if (y + 1 < height) distance[index] = Math.min(distance[index], distance[index + width] + 1);
+        }
+        return distance;
+      }
+      const canopyDistance = world.canopyRelief ? distanceToEdge(collisionMask) : null;
+      let plantMask = null, plantDistance = null;
+      if (world.vegetationRelief) {
+        stats.plants ??= 0;
+        const candidates = new Uint8Array(heights.length), visited = new Uint8Array(heights.length);
+        plantMask = new Uint8Array(heights.length);
+        const queue = new Int32Array(heights.length);
+        for (let i = 0; i < heights.length; i++) {
+          if (collisionMask[i] || foliageMask[i]) continue;
+          if (isVegetationPixel(i)) candidates[i] = 1;
+        }
+        for (let start = 0; start < heights.length; start++) {
+          if (!candidates[start] || visited[start]) continue;
+          let head = 0, tail = 0, left = width, right = -1, top = height, bottom = -1;
+          queue[tail++] = start;
+          visited[start] = 1;
+          while (head < tail) {
+            const index = queue[head++], x = index % width, y = Math.floor(index / width);
+            left = Math.min(left, x); right = Math.max(right, x);
+            top = Math.min(top, y); bottom = Math.max(bottom, y);
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx, ny = y + dy;
+              if ((!dx && !dy) || nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+              const neighbor = ny * width + nx;
+              if (candidates[neighbor] && !visited[neighbor]) {
+                visited[neighbor] = 1;
+                queue[tail++] = neighbor;
+              }
+            }
+          }
+          if (tail < 6 || tail > 72 || right - left + 1 > 12 || bottom - top + 1 > 12) continue;
+          for (let i = 0; i < tail; i++) plantMask[queue[i]] = 1;
+          stats.plants++;
+        }
+        plantDistance = distanceToEdge(plantMask);
+      }
+      for (const { x, y, depth, sculpted, slope, size = 16 } of world.surfaces) {
+        for (let dy = 0; dy < size; dy++) for (let dx = 0; dx < size; dx++) {
+          const px = x + dx, py = y + dy, code = world.tiles[(py >> 3) * world.tileColumns + (px >> 3)];
+          const color = world.wideTiles
+            ? game.tilePixel(code & 255, code >> 8, px & 7, py & 7, unsignedTiles)
+            : game.tilePixel(code, 0, px & 7, py & 7, false);
+          const pixel = (py * width + px) * 4;
+          const sculptedHeight = world.luminanceRelief
+            ? Math.round((ground.pixels[pixel] * 0.2126 + ground.pixels[pixel + 1] * 0.7152
+              + ground.pixels[pixel + 2] * 0.0722) * 14 / 255)
+            : 3 + color * 4;
+          const canopy = canopyDistance ? Math.min(1, canopyDistance[py * width + px] / 8) : 0;
+          const canopyHeight = world.canopyRelief
+            ? Math.min(14, Math.round(sculptedHeight * (0.25 + canopy * 0.75) + canopy * 3))
+            : sculptedHeight;
           heights[py * width + px] = scale === 0 ? 0
             : slope ? Math.round(depth * (slope === "right" ? (15 - dx) / 15
               : slope === "left" ? dx / 15 : slope === "up" ? dy / 15 : slope === "down" ? (15 - dy) / 15
                 : Math.min((15 - dx) / 15, dy / 15)))
-              : sculpted ? 3 + game.tilePixel(tile, 0, px & 7, py & 7, false) * 4 : depth;
+              : foliageMask[py * width + px] ? 0 : sculpted ? canopyHeight : plantMask?.[py * width + px]
+                ? Math.min(7, 2 + plantDistance[py * width + px]) : depth;
         }
         if (sculpted) stats.sculpted = (stats.sculpted || 0) + 1;
       }
@@ -355,8 +540,10 @@
       const edge = (x, y, vertical) => {
         const a = at(x - Number(vertical), y - Number(!vertical)), b = at(x, y);
         if (a === b) return null;
-        if ((a === -128 && b === 0) || (b === -128 && a === 0)) return null;
-        return [a === -128 ? 0 : a, b === -128 ? 0 : b, a === -128 ? 1 : b === -128 ? -1 : Math.sign(b - a)];
+        const outsideA = a === -128, outsideB = b === -128, foundation = world.foundationDepth ?? 0;
+        if (!foundation && ((outsideA && b === 0) || (outsideB && a === 0))) return null;
+        return [outsideA ? -foundation : a, outsideB ? -foundation : b,
+          outsideA ? 1 : outsideB ? -1 : Math.sign(b - a)];
       };
       for (const vertical of [false, true]) {
         const lines = (vertical ? width : height) + 1, length = vertical ? height : width;
@@ -442,19 +629,19 @@
       stats.furniture = (stats.furniture || 0) + 1;
     }
     if (!reusable) {
-      if (world.generic) {
-        for (const { x, y, depth } of world.surfaces) {
+      if (world.generic && !world.procedural) {
+        for (const { x, y, depth, size = 16 } of world.surfaces) {
           const z = depth * scale, bottom = Math.min(0, z), top = Math.max(0, z);
-          const uv = [[x / width, y / height], [(x + 16) / width, y / height],
-            [(x + 16) / width, (y + 16) / height], [x / width, (y + 16) / height]];
-          quad(background, [[x, y, z], [x + 16, y, z], [x + 16, y + 16, z], [x, y + 16, z]], uv);
+          const uv = [[x / width, y / height], [(x + size) / width, y / height],
+            [(x + size) / width, (y + size) / height], [x / width, (y + size) / height]];
+          quad(background, [[x, y, z], [x + size, y, z], [x + size, y + size, z], [x, y + size, z]], uv);
           if (!depth) continue;
-          quad(models, [[x, y + 16, bottom], [x + 16, y + 16, bottom],
-            [x + 16, y + 16, top], [x, y + 16, top]], uv, 0.78);
-          quad(models, [[x, y, bottom], [x, y + 16, bottom], [x, y + 16, top], [x, y, top]], uv, 0.62);
-          quad(models, [[x + 16, y, bottom], [x, y, bottom], [x, y, top], [x + 16, y, top]], uv, 0.7);
-          quad(models, [[x + 16, y + 16, bottom], [x + 16, y, bottom],
-            [x + 16, y, top], [x + 16, y + 16, top]], uv, 0.88);
+          quad(models, [[x, y + size, bottom], [x + size, y + size, bottom],
+            [x + size, y + size, top], [x, y + size, top]], uv, 0.78);
+          quad(models, [[x, y, bottom], [x, y + size, bottom], [x, y + size, top], [x, y, top]], uv, 0.62);
+          quad(models, [[x + size, y, bottom], [x, y, bottom], [x, y, top], [x + size, y, top]], uv, 0.7);
+          quad(models, [[x + size, y + size, bottom], [x + size, y, bottom],
+            [x + size, y, top], [x + size, y + size, top]], uv, 0.88);
         }
       } else {
         if (world.procedural) relief();
@@ -500,8 +687,8 @@
       const { left, right, bottom } = component, x = (left + right) / 2 + world.originX, y = bottom - 1 + world.originY;
       component.elevation = world.spriteSurfaces?.find(cell => x >= cell.x && x < cell.x + cell.width
         && y >= cell.y && y < cell.y + cell.depth)?.height
-        ?? world.surfaces?.find(cell => !cell.sculpted && x >= cell.x && x < cell.x + 16
-          && y >= cell.y && y < cell.y + 16)?.depth ?? 0;
+        ?? world.surfaces?.find(cell => !cell.sculpted && x >= cell.x && x < cell.x + (cell.size ?? 16)
+          && y >= cell.y && y < cell.y + (cell.size ?? 16))?.depth ?? 0;
       stats.characters++;
     }
     for (let y = 0; y < 144; y++) for (let x = 0; x < 160;) {
@@ -529,7 +716,8 @@
         world.procedural ? `décors procéduraux · ${world.objects.length} objets · ${stats.sculpted || 0} motifs sculptés${world.bounded ? " · région locale" : ""}`
           : world.generic ? `${world.surfaces.length} secteurs texturés`
           : stats.furniture ? `${stats.furniture} meubles et parois` : `${stats.houses} maisons · ${stats.trees} arbres`
-      } · ${stats.characters} silhouettes` };
+      }${world.modeledFoliage ? ` · ${stats.trees} arbres en volume` : ""}${
+        stats.plants ? ` · ${stats.plants} touffes en volume` : ""} · ${stats.characters} silhouettes` };
   }
   const api = { build };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

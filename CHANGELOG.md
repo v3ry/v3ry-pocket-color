@@ -4,6 +4,14 @@ Les changements notables de chaque version sont consignés ici.
 
 ## [Non publié]
 
+### Ajouté
+
+- GB/GBC : rendus 2,5D et dioramas 3D expérimentaux pour la salle de départ d'Oracle of Ages et 40 écrans extérieurs voisins du présent (version européenne, En/Fr/De/Es/It, jusqu'à quatre écrans de distance). Les tuiles CGB et collisions servent de base au relief ; les grands groupes de feuillage sont reconstruits en couronnes facettées texturées avec troncs, et les petits buissons en feuilles pliées plutôt qu'en blocs. Cette reconnaissance des végétaux reste heuristique. Un socle texturé, un fond vert sombre et les sprites redressés complètent le diorama. La carte BG `$9800` et l'adressage signé restent fixes ; les chargements de salle, défilements et fondus désactivent temporairement le relief. Les intérieurs, le passé et les autres régions restent en 2D, les dialogues sont superposés ; le jeu et ses sauvegardes ne sont pas modifiés.
+
+### Corrigé
+
+- GB/GBC : suppression du clignotement 2D/3D dans les extérieurs d'Oracle of Ages lorsque le jeu alterne les registres de défilement pour dessiner l'interface (observé dans la salle `$7A`). Les transitions sont détectées par l'état de salle en mémoire, et le relief 2,5D conserve une origine et une carte BG fixes, indépendantes de ce découpage d'affichage.
+
 ## [0.12.0] - 2026-10-12
 
 ### Ajouté

@@ -584,7 +584,7 @@ function updateScene(force = false) {
     resetSceneCamera();
     if (!scenePreset) returnTo2D(emulator
       ? "Aucun preset 2.5D pour cette ROM : rendu 2D conservé."
-      : "Prototype 2.5D : chargez Pokémon Rouge FR, Pokémon Jaune, Cristal UE 1.1 ou Aladdin GBC pour activer un preset.");
+      : "Prototype 2.5D : chargez Pokémon Rouge FR, Pokémon Jaune, Cristal UE 1.1, Aladdin GBC ou Zelda Oracle of Ages pour activer un preset.");
     else sceneMessage(`Preset disponible : ${scenePreset.name}. Choisissez le rendu 2.5D${scenePreset.world ? " ou 3D" : ""} pour l’activer.`);
     force = true;
   }

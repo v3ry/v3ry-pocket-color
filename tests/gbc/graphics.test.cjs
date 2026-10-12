@@ -33,6 +33,23 @@ test("3D tile grid decodes signed graphics from both banks with explicit palette
   assert.throws(() => tileGrid(dmg, new Uint16Array(129), 129, 1), /Dimensions/);
 });
 
+test("wide 3D tile grid decodes CGB attributes, flips and LCDC tile addressing", () => {
+  const game = new GameBoy(makeROM({ color: true }));
+  game.bgPalette.fill(0);
+  game.bgPalette.set([0x1f, 0], 10);
+  game.io[0x40] = 0x90;
+  game.vram[8192 + 200 * 16 + 14] = 1;
+
+  const grid = tileGrid(game, new Uint16Array([200 | (0x69 << 8)]), 1, 1, true);
+  assert.deepEqual(pixel(grid, 0, 0), [255, 0, 0, 255]);
+  assert.throws(() => tileGrid(game, [0x10000], 1, 1, true), /Tuile/);
+
+  game.io[0x40] = 0x80;
+  game.vram[0x1000 + 10 * 16] = 128;
+  const signed = tileGrid(game, new Uint16Array([10 | (1 << 8)]), 1, 1, true);
+  assert.deepEqual(pixel(signed, 0, 0), [255, 0, 0, 255]);
+});
+
 test("graphics inspection is read-only, including pixels, window counter and mapper state", () => {
   for (const color of [false, true]) {
     const game = new GameBoy(makeROM({ color }));

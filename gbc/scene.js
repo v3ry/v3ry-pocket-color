@@ -33,9 +33,11 @@
     }
     let tiles = 0;
     if ((game.io[0x40] & 128) && (game.color || (game.io[0x40] & 1))) {
-      const sx = terrain?.screenMap ? 0 : game.io[0x43], sy = terrain?.screenMap ? 0 : game.io[0x42];
-      const map = terrain?.screenMap ? (game.io[0x40] & 0x40 ? 0x1c00 : 0x1800)
-        : game.io[0x40] & 8 ? 0x1c00 : 0x1800;
+      const sx = terrain?.screenMap ? 0 : terrain?.active ? terrain.scrollX ?? game.io[0x43] : game.io[0x43];
+      const sy = terrain?.screenMap ? 0 : terrain?.active ? terrain.scrollY ?? game.io[0x42] : game.io[0x42];
+      const map = terrain?.active && terrain.mapOffset !== undefined ? terrain.mapOffset
+        : terrain?.screenMap ? (game.io[0x40] & 0x40 ? 0x1c00 : 0x1800)
+          : game.io[0x40] & 8 ? 0x1c00 : 0x1800;
       for (let y = -(sy & 7); y < 144; y += 8) for (let x = -(sx & 7); x < 160; x += 8) {
         const tx = (x + sx) & 255, ty = (y + sy) & 255;
         const index = map + (ty >> 3) * 32 + (tx >> 3);

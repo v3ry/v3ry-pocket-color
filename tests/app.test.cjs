@@ -20,6 +20,7 @@ const AladdinPreset = require("../gbc/preset/aladdin.js");
 const CrystalPreset = require("../gbc/preset/pokemon-crystal.js");
 const RedPreset = require("../gbc/preset/pokemon-red.js");
 const YellowPreset = require("../gbc/preset/pokemon-yellow.js");
+const ZeldaOraclesPreset = require("../gbc/preset/zelda-oracles.js");
 
 class Element {
   constructor() {
@@ -133,7 +134,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketStates: States,
     PocketGBAStates: GBAStates,
     PocketGraphics: Graphics,
-    PocketPresets: [AladdinPreset, CrystalPreset, RedPreset, YellowPreset],
+    PocketPresets: [AladdinPreset, CrystalPreset, RedPreset, YellowPreset, ZeldaOraclesPreset],
     PocketScene: { ...Scene, Renderer: class {
       render2D(game, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.filtered2D = (scope.filtered2D || 0) + 1; return { smoothed: true }; }
       render(game, preset, camera, mode, smoothing, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.sceneMode = mode; scope.sceneSmoothing = smoothing; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360, smoothed: smoothing }; }
@@ -197,7 +198,7 @@ test("HTML loads the relocated GB/GBC browser scripts in dependency order", () =
   assert.equal(typeof scope.PocketGraphics.inspect, "function");
   assert.equal(typeof scope.PocketWorld.build, "function");
   assert.equal(typeof scope.PocketScene.Renderer, "function");
-  assert.equal(scope.PocketPresets.length, 4);
+  assert.equal(scope.PocketPresets.length, 5);
   assert.equal(typeof scope.PocketGameBoyAdvance, "function");
   assert.equal(typeof scope.PocketGBAAPU, "function");
   const gba = new scope.PocketGameBoyAdvance(makeGBADemo());

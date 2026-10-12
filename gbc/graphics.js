@@ -129,7 +129,8 @@
     }
     return { labels, components };
   }
-  function tileGrid(game, tiles, columns, rows) {
+  function tileGrid(game, tiles, columns, rows, wide = false,
+    unsignedTiles = !!(game.io[0x40] & 16)) {
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 1 || rows < 1
       || columns > 128 || rows > 128 || tiles.length !== columns * rows) {
       throw new Error("Dimensions de texture de carte invalides.");
@@ -141,10 +142,15 @@
       return view.pixels.slice();
     }));
     for (let i = 0; i < tiles.length; i++) {
-      const code = tiles[i], tile = code & 127, attributes = ((code & 128) ? 8 : 0) | (code >> 8);
-      if (!Number.isInteger(code) || code < 0 || code > 0x7ff) throw new Error("Tuile de texture de carte invalide.");
+      const code = tiles[i];
+      if (!Number.isInteger(code) || code < 0 || code > (wide ? 0xffff : 0x7ff)) {
+        throw new Error("Tuile de texture de carte invalide.");
+      }
+      const tile = code & (wide ? 255 : 127);
+      const attributes = wide ? code >> 8 : ((code & 128) ? 8 : 0) | (code >> 8);
+      const unsigned = wide && unsignedTiles;
       for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-        const color = game.tilePixel(tile, attributes, x, y, false);
+        const color = game.tilePixel(tile, attributes, x, y, unsigned);
         const index = ((Math.floor(i / columns) * 8 + y) * output.width + (i % columns) * 8 + x) * 4;
         output.pixels.set(colors[attributes & 7][color], index);
       }

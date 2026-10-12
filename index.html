@@ -34,6 +34,7 @@
     <script src="gbc/preset/gen1-engine.js" defer></script>
     <script src="gbc/preset/pokemon-red.js" defer></script>
     <script src="gbc/preset/pokemon-yellow.js" defer></script>
+    <script src="gbc/preset/zelda-oracles.js" defer></script>
     <script src="gbc/world.js" defer></script>
     <script src="gbc/scene.js" defer></script>
     <script src="gba/cpu.js" defer></script>
@@ -161,7 +162,7 @@
         <p class="status-message" id="fullscreen-status" role="status" aria-live="polite" hidden></p>
         <p class="status-message" id="console-status" role="status" hidden>GBA expérimentale : audio PSG et Direct Sound disponibles ; shaders et 3D non disponibles. États, sauvegardes SRAM, Flash et EEPROM prises en charge. Certains services BIOS ne sont pas implémentés ; une erreur arrête explicitement l’émulation.</p>
         <p id="comfort-status" class="status-message" role="status" aria-live="polite">Vitesse normale. Le son est coupé pendant l’avance rapide.</p>
-        <p id="scene-status" class="status-message" role="status" aria-live="polite">Prototype 2.5D : chargez Pokémon Rouge FR, Pokémon Jaune, Cristal UE 1.1 ou Aladdin GBC pour activer un preset.</p>
+        <p id="scene-status" class="status-message" role="status" aria-live="polite">Prototype 2.5D : chargez Pokémon Rouge FR, Pokémon Jaune, Cristal UE 1.1, Aladdin GBC ou Zelda Oracle of Ages pour activer un preset.</p>
         <details class="settings" id="camera-settings">
           <summary>Caméra et relief 2.5D / 3D</summary>
           <p>Shaders au choix : lissage léger FXAA, arrondi des sprites (coins de pixels coupés sans flou), netteté ou CRT rétro (lignes, masque RGB et vignettage). Choisir un filtre l’active. En 2D, toute l’image est filtrée, textes inclus, sans preset requis. En 2.5D/3D, dialogues et menu Start restent nets. Décochez « Activer le shader » pour retrouver les pixels originaux. Le filtre ajoute une passe GPU ; l’arrondi ne mélange pas les couleurs et ne floute pas l’image.</p>
@@ -169,6 +170,7 @@
           <p>Mode 3D : Bourg Geon conserve ses arbres et maisons modélisés. Les autres cartes reconnues de Cristal utilisent un sol horizontal texturé, des volumes selon les collisions et des personnages debout : villes, routes, intérieurs, grottes, passages et donjons. Start et les dialogues standard restent en surimpression au-dessus du décor 3D. Décors génériques approximatifs ; combats et sous-menus plein écran en 2D.</p>
           <p>Rouge français : Bourg Palette, ses intérieurs et la Route 1 ont leurs modèles dédiés. Jadielle et ses intérieurs, la Forêt de Jade et les grottes ont des motifs vérifiés sur leurs plans ROM : arbres composites, mobilier texturé, appareils de soin, parois orientées et échelles. Les autres cartes reconnues utilisent des décors procéduraux enrichis pour les 24 familles d’environnements ; les motifs inconnus restent sculptés au pixel. Les grandes cartes utilisent une région locale. En 3D, les combats sauvages et de dresseurs ont une arène en volume et leurs silhouettes originales extrudées, pas des modèles anatomiques de chaque Pokémon. PV, menus, dialogues et Start restent fixes ; sous-menus plein écran en 2D. Ce n’est pas encore une modélisation manuelle fidèle de chaque lieu de Kanto.</p>
           <p>Pokémon Jaune : même moteur 2.5D/3D que Rouge, avec les adresses mémoire de la version Jaune. Les cartes de Kanto reprennent les plans et décors vérifiés de Rouge ; les différences propres à Jaune (Pikachu, scènes spécifiques) ne sont pas encore modélisées.</p>
+          <p>Oracle of Ages (Europe) : relief 2,5D et dioramas 3D expérimentaux pour la salle de départ et 40 écrans extérieurs voisins du présent (jusqu'à quatre écrans de distance). Les tuiles CGB et collisions servent de base ; les feuillages verts sont interprétés en couronnes avec troncs et en touffes de feuilles. Les intérieurs, le passé, les autres régions et les transitions restent en 2D ; les dialogues sont superposés sans modifier le jeu.</p>
           <div class="settings-row">
             <label for="scene-yaw">Rotation <input id="scene-yaw" type="range" min="-45" max="45" value="-18"> <output id="scene-yaw-value">-18°</output></label>
             <label for="scene-pitch">Inclinaison <input id="scene-pitch" type="range" min="-35" max="35" value="10"> <output id="scene-pitch-value">10°</output></label>
