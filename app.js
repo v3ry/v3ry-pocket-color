@@ -48,6 +48,9 @@ let graphicsTime = -Infinity;
 let graphicsGame = null;
 let graphicsFailed = false;
 const sceneCanvas = document.querySelector("#scene-canvas");
+const sceneResolution = document.querySelector("#scene-resolution");
+const sceneCanvasBaseWidth = sceneCanvas.width || 640;
+const sceneCanvasBaseHeight = sceneCanvas.height || 576;
 const sceneStatus = document.querySelector("#scene-status");
 const renderMode = document.querySelector("#render-mode");
 let sceneRenderer = null;
@@ -558,18 +561,41 @@ function resetSceneCamera() {
 function returnTo2D(message, error = false) {
   if (!isGBA()) emulator?.setVideoCapture(false);
   renderMode.value = "2d";
+  sceneResolution.disabled = isGBA();
+  document.querySelector("#scene-smoothing").disabled = isGBA();
+  if (sceneCanvas.width !== sceneCanvasBaseWidth) sceneCanvas.width = sceneCanvasBaseWidth;
+  if (sceneCanvas.height !== sceneCanvasBaseHeight) sceneCanvas.height = sceneCanvasBaseHeight;
+  sceneCanvas.classList.toggle("is-super-resolution", false);
   sceneCanvas.hidden = true;
   sceneCanvas.setAttribute("aria-hidden", "true");
   sceneMessage(message, error);
 }
 function updateScene(force = false) {
   if (isGBA()) {
+    sceneResolution.disabled = true;
+    document.querySelector("#scene-smoothing").disabled = true;
     sceneGame?.setVideoCapture?.(false);
     sceneGame = null;
     scenePreset = null;
     returnTo2D("GBA : rendu 2D natif 240 × 160. Shaders et rendus 2.5D/3D non disponibles.");
     return;
   }
+  const requestedResolution = Number(sceneResolution.value);
+  if (![1, 2, 4].includes(requestedResolution)) {
+    sceneResolution.value = "1";
+    returnTo2D("Réglage de sur-résolution 2D invalide.", true);
+    return;
+  }
+  const superResolution2D = renderMode.value === "2d" && requestedResolution > 1;
+  const outputScale = superResolution2D ? requestedResolution : 1;
+  const outputWidth = sceneCanvasBaseWidth * outputScale;
+  const outputHeight = sceneCanvasBaseHeight * outputScale;
+  if (sceneCanvas.width !== outputWidth) sceneCanvas.width = outputWidth;
+  if (sceneCanvas.height !== outputHeight) sceneCanvas.height = outputHeight;
+  sceneCanvas.classList.toggle("is-super-resolution", superResolution2D);
+  sceneResolution.disabled = renderMode.value !== "2d";
+  document.querySelector("#scene-smoothing").disabled = superResolution2D;
+  if (superResolution2D) document.querySelector("#scene-smoothing").checked = true;
   if (sceneGame !== emulator) {
     sceneGame?.setVideoCapture(false);
     sceneGame = emulator;
@@ -600,10 +626,12 @@ function updateScene(force = false) {
       sceneRenderer.render2D(emulator, document.querySelector("#scene-filter").value);
       sceneCanvas.hidden = false;
       sceneCanvas.setAttribute("aria-hidden", "false");
-      sceneMessage(`2D · shader ${shaderLabel()} · image entière filtrée, textes inclus · jeu et sauvegardes inchangés.`);
+      const resolution = superResolution2D ? ` · sur-résolution ×${outputScale} (${outputWidth} × ${outputHeight})` : "";
+      sceneMessage(`2D · shader ${shaderLabel()}${resolution} · image entière filtrée, textes inclus · jeu et sauvegardes inchangés.`);
     } catch (error) {
       if (sceneRenderer) { sceneRenderer.dispose(); sceneRenderer = null; }
       document.querySelector("#scene-smoothing").checked = false;
+      if (superResolution2D) sceneResolution.value = "1";
       returnTo2D(`Filtre 2D arrêté : ${error.message} Retour aux pixels originaux.`, true);
       console.error(error);
     }
@@ -637,6 +665,7 @@ function updateScene(force = false) {
   }
 }
 renderMode.value = "2d";
+sceneResolution.value = "1";
 document.querySelector("#scene-smoothing").checked = false;
 document.querySelector("#scene-filter").value = "light";
 document.querySelector("#scene-filter").addEventListener("change", () => {
@@ -645,9 +674,16 @@ document.querySelector("#scene-filter").addEventListener("change", () => {
   canvas.focus();
 });
 document.querySelector("#scene-smoothing").addEventListener("change", () => {
+  if (renderMode.value === "2d" && Number(sceneResolution.value) > 1) {
+    document.querySelector("#scene-smoothing").checked = true;
+  }
   updateScene(true);
   if (renderMode.value === "2d" && !document.querySelector("#scene-smoothing").checked
     && !sceneStatus.classList.contains("is-error")) sceneMessage("Rendu 2D original rétabli, sans filtre.");
+  canvas.focus();
+});
+sceneResolution.addEventListener("change", () => {
+  updateScene(true);
   canvas.focus();
 });
 renderMode.addEventListener("change", () => {
@@ -839,7 +875,7 @@ function updateConsole() {
   canvas.setAttribute("aria-label", gba ? "Écran de jeu Game Boy Advance" : "Écran de jeu Game Boy Color");
   player.classList.toggle("is-gba", gba);
   document.querySelector(".system-pill").textContent = gba ? "GBA" : "GB / GBC";
-  for (const selector of ["#render-mode", "#scene-smoothing", "#scene-filter"]) document.querySelector(selector).disabled = gba;
+  for (const selector of ["#render-mode", "#scene-smoothing", "#scene-filter", "#scene-resolution"]) document.querySelector(selector).disabled = gba;
   document.querySelector("#camera-settings").hidden = graphicsInspector.hidden = gba;
   printerPanel.hidden = gba || printerOutput.hidden || printerPanelDismissed;
   for (const button of document.querySelectorAll("[data-gba]")) button.hidden = !gba;

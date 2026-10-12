@@ -439,6 +439,7 @@ body.is-immersive {
   pointer-events: none;
   image-rendering: pixelated;
 }
+#scene-canvas.is-super-resolution { image-rendering: auto; }
 #scene-canvas[hidden] { display: none; }
 
 .archive-picker {
@@ -1241,4 +1242,3 @@ summary:focus-visible {
 :root[data-theme="dark"] summary:focus-visible {
   outline-color: rgb(118 187 140 / 40%);
 }
-

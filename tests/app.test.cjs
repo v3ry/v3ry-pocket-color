@@ -60,6 +60,8 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
   canvas.getContext = () => context;
   canvas.toDataURL = () => "data:image/png;base64,AAAA";
   canvas.toBlob = callback => callback(new Blob(["png"], { type: "image/png" }));
+  element("#scene-canvas").width = 640;
+  element("#scene-canvas").height = 576;
   const cameraVideo = element("#camera-video");
   cameraVideo.readyState = 2; cameraVideo.videoWidth = 320; cameraVideo.videoHeight = 240;
   cameraVideo.play = async () => {};
@@ -136,7 +138,7 @@ function harness(store = memorySaveStore(), preferences = new Map()) {
     PocketGraphics: Graphics,
     PocketPresets: [AladdinPreset, CrystalPreset, RedPreset, YellowPreset, ZeldaOraclesPreset],
     PocketScene: { ...Scene, Renderer: class {
-      render2D(game, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.filtered2D = (scope.filtered2D || 0) + 1; return { smoothed: true }; }
+      render2D(game, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.sceneOutputSize = [element("#scene-canvas").width, element("#scene-canvas").height]; scope.filtered2D = (scope.filtered2D || 0) + 1; return { smoothed: true }; }
       render(game, preset, camera, mode, smoothing, filter) { if (scope.failScene) throw new Error("WebGL failed"); scope.sceneFilter = filter; scope.sceneMode = mode; scope.sceneSmoothing = smoothing; scope.sceneRenders = (scope.sceneRenders || 0) + 1; return { tiles: 360, smoothed: smoothing }; }
       dispose() { scope.sceneDisposed = true; }
     } },
@@ -610,6 +612,50 @@ test("shader selector activates all filters in 2D and preserves the choice in pe
   assert.equal(h.scope.sceneFilter, "crt");
   h.element("#scene-smoothing").checked = false; h.element("#scene-smoothing").fire("change");
   assert.equal(h.scope.sceneSmoothing, false);
+});
+test("2D super-resolution renders the requested output size and stays disabled in perspective and GBA modes", async () => {
+  const h = harness();
+  await load(h, "test.gbc", makeROM({ color: true, type: 0x19, program: [0x18, 0xfe] }));
+  h.evaluate("stopLoop(); paused = true; emulator.cartridge.title = 'ALADDIN'; sceneGame = null; updateScene(true)");
+  const resolution = h.element("#scene-resolution");
+  assert.equal(resolution.value, "1");
+  assert.equal(resolution.disabled, false);
+  for (const [scale, size] of [["2", [1280, 1152]], ["4", [2560, 2304]]]) {
+    resolution.value = scale;
+    resolution.fire("change");
+    assert.equal(h.evaluate("renderMode.value"), "2d");
+    assert.deepEqual([h.element("#scene-canvas").width, h.element("#scene-canvas").height], size);
+    assert.deepEqual(h.scope.sceneOutputSize, size);
+    assert.equal(h.element("#scene-smoothing").checked, true);
+    assert.equal(h.element("#scene-smoothing").disabled, true);
+    assert.equal(h.element("#scene-canvas").classList.contains("is-super-resolution"), true);
+    assert.match(h.element("#scene-status").textContent, new RegExp(`sur-résolution ×${scale}`));
+  }
+  h.element("#render-mode").value = "2.5d";
+  h.element("#render-mode").fire("change");
+  assert.deepEqual([h.element("#scene-canvas").width, h.element("#scene-canvas").height], [640, 576]);
+  assert.equal(resolution.disabled, true);
+  assert.equal(h.element("#scene-canvas").classList.contains("is-super-resolution"), false);
+  h.element("#render-mode").value = "2d";
+  h.element("#render-mode").fire("change");
+  assert.deepEqual([h.element("#scene-canvas").width, h.element("#scene-canvas").height], [2560, 2304]);
+  await load(h, "test.gba", makeGBADemo());
+  assert.equal(resolution.disabled, true);
+});
+test("2D super-resolution GPU errors restore standard output without retrying every frame", async () => {
+  const h = harness();
+  await load(h, "test.gb", makeROM({ program: [0x18, 0xfe] }));
+  h.evaluate("stopLoop(); paused = true");
+  h.scope.failScene = true;
+  h.element("#scene-resolution").value = "2";
+  h.element("#scene-resolution").fire("change");
+  assert.equal(h.element("#scene-resolution").value, "1");
+  assert.deepEqual([h.element("#scene-canvas").width, h.element("#scene-canvas").height], [640, 576]);
+  assert.equal(h.element("#scene-canvas").hidden, true);
+  assert.match(h.element("#scene-status").textContent, /Filtre 2D arrêté.*WebGL failed/);
+  const errors = h.errors.length;
+  h.evaluate("updateScene(true)");
+  assert.equal(h.errors.length, errors);
 });
 test("2D smoothing works without presets, follows every draw and reports GPU errors without retry loops", async () => {
   const h = harness();

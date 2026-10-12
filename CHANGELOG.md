@@ -6,6 +6,7 @@ Les changements notables de chaque version sont consignés ici.
 
 ### Ajouté
 
+- GB/GBC : sur-résolution GPU facultative pour le rendu 2D filtré, en sortie ×2 (1280 × 1152) ou ×4 (2560 × 2304) au-dessus du canvas standard 640 × 576. Le rendu natif du jeu reste en 160 × 144 ; cette passe améliore le sur-échantillonnage à l'affichage sans inventer de détails source. Les modes 2.5D/3D et le 2D original sans shader restent inchangés.
 - GB/GBC : rendus 2,5D et dioramas 3D expérimentaux pour la salle de départ d'Oracle of Ages et 40 écrans extérieurs voisins du présent (version européenne, En/Fr/De/Es/It, jusqu'à quatre écrans de distance). Les tuiles CGB et collisions servent de base au relief ; les grands groupes de feuillage sont reconstruits en couronnes facettées texturées avec troncs, et les petits buissons en feuilles pliées plutôt qu'en blocs. Cette reconnaissance des végétaux reste heuristique. Un socle texturé, un fond vert sombre et les sprites redressés complètent le diorama. La carte BG `$9800` et l'adressage signé restent fixes ; les chargements de salle, défilements et fondus désactivent temporairement le relief. Les intérieurs, le passé et les autres régions restent en 2D, les dialogues sont superposés ; le jeu et ses sauvegardes ne sont pas modifiés.
 
 ### Corrigé

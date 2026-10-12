@@ -747,6 +747,24 @@ test("2D filtering uses the complete original image without presets, camera, cap
   renderer.dispose();
   assert.equal(gl.deleted.length, 18);
 });
+test("2D shader supports 2x and 4x output while keeping filter steps tied to native pixels", () => {
+  const gl = fakeGL(), canvas = { width: 640, height: 576, getContext: () => gl };
+  const renderer = new Scene.Renderer(canvas), game = new GameBoy(makeROM());
+  for (const [width, height] of [[1280, 1152], [2560, 2304]]) {
+    canvas.width = width;
+    canvas.height = height;
+    gl.calls.length = 0;
+    assert.equal(renderer.render2D(game).smoothed, true);
+    assert.deepEqual(gl.calls.find(call => call.method === "viewport").args, [0, 0, width, height]);
+    assert.deepEqual(gl.calls.find(call => call.method === "texImage2D" && call.args[8] === null).args.slice(3, 5),
+      [width, height]);
+    assert.deepEqual(gl.calls.find(call => call.method === "uniform2f" && call.args[0] === "uPixel").args,
+      ["uPixel", 1 / width, 1 / height]);
+    assert.deepEqual(gl.calls.find(call => call.method === "uniform2f" && call.args[0] === "uStep").args,
+      ["uStep", 1 / 160, 1 / 144]);
+  }
+  renderer.dispose();
+});
 test("shader choices reuse a single GPU program and supply source-pixel steps only in 2D", () => {
   const gl = fakeGL(), renderer = new Scene.Renderer({ width: 640, height: 576, getContext: () => gl });
   const game = new GameBoy(makeROM());
